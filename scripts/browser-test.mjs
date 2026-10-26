@@ -34,12 +34,20 @@ try{
   await page.getByRole("button",{name:"Start round",exact:true}).click();
   await page.getByRole("button",{name:"Pause",exact:true}).waitFor();
   pass("Two browser sessions create/join a room and begin a shared round");
+  let pollingRequests = 0;
+  for (const context of [host, guest]) await context.route("**/agents/rehearsal/*", route => {
+    if (route.request().method() === "GET") { pollingRequests++; return route.abort(); }
+    return route.continue();
+  });
   await page.locator("#message").fill("I will coordinate. Sam, please check the token scope and report uncertainty.");
   await page.getByRole("button",{name:"Send",exact:true}).click();
   await peer.getByText("I will coordinate. Sam, please check the token scope and report uncertainty.",{exact:true}).waitFor();
   await peer.locator("#message").fill("Acknowledged. I will report findings in two minutes.");await peer.getByRole("button",{name:"Send",exact:true}).click();
   await page.getByText("Acknowledged. I will report findings in two minutes.",{exact:true}).waitFor();
   pass("Live messages arrive in both participant browsers");
+  await page.locator("#message").fill("@Release manager What do you need from us?"); await page.getByRole("button",{name:"Send",exact:true}).click();
+  await peer.getByText("Release manager - ai",{exact:true}).waitFor();
+  pass("Fictional colleague replies have their own AI author label");
   await page.getByRole("button",{name:"Create a thread",exact:true}).click();await page.locator("#modal-input").fill("Token investigation");await page.getByRole("button",{name:"Confirm",exact:true}).click();
   await page.getByRole("heading",{name:"Token investigation",exact:true}).waitFor();
   await peer.getByRole("button",{name:"Token investigation",exact:true}).click();
@@ -51,6 +59,10 @@ try{
   await page.getByText("Authored coach",{exact:true}).waitFor();
   await page.getByRole("button",{name:"Use status template",exact:true}).click();assert((await page.locator("#message").inputValue()).includes("Next update:"));await page.locator("#message").fill("");
   await page.getByRole("button",{name:"Pause",exact:true}).click();await page.getByRole("button",{name:"Resume",exact:true}).waitFor();await page.getByRole("button",{name:"Resume",exact:true}).click();
+  await host.unroute("**/agents/rehearsal/*");
+  await guest.unroute("**/agents/rehearsal/*");
+  assert.equal(pollingRequests, 0, "Live updates must use WebSocket without room GET requests");
+  pass("Messages, character replies, actions and pause/resume work with HTTP room reads blocked");
   await page.reload();await page.getByRole("button",{name:"Pause",exact:true}).waitFor();
   pass("Authored coaching, templates, pause/resume and saved-session reload work");
   await page.getByRole("button",{name:"Coordination",exact:true}).click();

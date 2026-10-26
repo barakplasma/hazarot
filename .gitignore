@@ -10,3 +10,5 @@ qa/
 test-results.json
 browser-results.json
 runtime-results.json
+
+public/analytics.js

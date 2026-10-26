@@ -1,9 +1,10 @@
+import { trackCommand } from "/analytics.js";
 const $ = (id) => document.getElementById(id);
 const make = (tag, text, className) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (className) e.className = className; return e; };
 const params = new URLSearchParams(location.search);
 let room = params.get("room"), invite = params.get("invite"), session = room ? JSON.parse(localStorage.getItem(`rehearsal:${room}`) || "null") : null;
 let scenarios = [], selected, snapshot, selectedThread = "coordination", socket, refreshPromise, modalAction;
-let lastRender = "", reconnectAttempts = 0, refreshingAgain = false;
+let lastRender = "", reconnectAttempts = 0, refreshingAgain = false, snapshotChunks;
 const endpoint = () => `/agents/rehearsal/${room}`;
 
 function notice(text) { $("notice").textContent = text; $("notice").hidden = !text; }
@@ -20,22 +21,43 @@ async function command(op, payload = {}) {
     // A network retry must reuse the same command ID. Domain errors are shown.
     if (error instanceof TypeError) data = await api(endpoint(), { method: "POST", body }); else throw error;
   }
-  if (data.scenario) { snapshot = data; render(); }
+  trackCommand({ participant_name: session?.name, participant_id: data.me?.id, room_id: room, scenario_id: data.scenario?.id, operation: op, phase: data.phase, status: "success" });
+  if (data.scenario) applySnapshot(data);
   return data;
 }
 async function refresh() {
   if (refreshPromise) { refreshingAgain = true; return refreshPromise; }
   refreshPromise = (async () => {
-    try { snapshot = await api(endpoint()); render(); }
+    try { applySnapshot(await api(endpoint())); }
     catch (error) { notice(error.message); }
     finally { refreshPromise = undefined; if (refreshingAgain) { refreshingAgain = false; refresh(); } }
   })(); return refreshPromise;
 }
+function applySnapshot(next) {
+  if (next.room !== room || (snapshot && next.revision < snapshot.revision)) return;
+  snapshot = next; render();
+}
 function connect() {
   if (socket) { socket.onclose = null; socket.close(); }
   socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${endpoint()}?token=${encodeURIComponent(session.token)}`);
-  socket.onopen = () => { reconnectAttempts = 0; $("connection").textContent = "● Connected"; refresh(); };
-  socket.onmessage = (event) => { try { if (JSON.parse(event.data).type === "refresh") refresh(); } catch {} };
+  socket.onopen = () => { reconnectAttempts = 0; snapshotChunks = undefined; $("connection").textContent = "● Connected"; };
+
+  socket.onmessage = (event) => {
+    try {
+      const frame = JSON.parse(event.data);
+      if (frame.type === "snapshot") applySnapshot(frame.snapshot);
+      if (frame.type === "snapshot_chunk") {
+        if (snapshot && frame.revision < snapshot.revision) return;
+        if (!snapshotChunks || frame.revision > snapshotChunks.revision) snapshotChunks = { revision: frame.revision, total: frame.total, parts: new Map() };
+        if (frame.revision !== snapshotChunks.revision || frame.total !== snapshotChunks.total) return;
+        snapshotChunks.parts.set(frame.index, frame.data);
+        if (snapshotChunks.parts.size === frame.total) {
+          applySnapshot(JSON.parse(Array.from({ length: frame.total }, (_, i) => snapshotChunks.parts.get(i)).join("")));
+          snapshotChunks = undefined;
+        }
+      }
+    } catch { /* Ignore SDK control frames; reconnect sends a fresh snapshot. */ }
+  };
   socket.onclose = () => {
     $("connection").textContent = "Reconnecting…";
     setTimeout(connect, Math.min(1000 * 2 ** reconnectAttempts++, 12000));
@@ -118,6 +140,7 @@ function render() {
   const thread = s.threads.find(t => t.id === selectedThread) || s.threads[0]; selectedThread = thread.id;
   $("thread-title").textContent = thread.title;
   $("thread-subtitle").textContent = thread.kind === "personal" ? "Visible to everyone. Private by convention; share findings explicitly." : thread.kind === "meeting" ? "State the purpose. Finish with decisions, owners, and next steps." : "Share decisions, owners, and next updates.";
+  if (thread.kind !== "personal" && s.scenario.characters?.length) $("thread-subtitle").textContent += ` AI colleagues: ${s.scenario.characters.map(c => `@${c.name}`).join(", ")}.`;
   $("message").placeholder = `Message ${thread.title}…`;
   const fingerprint = `${selectedThread}:${s.messages.at(-1)?.id}`;
   if (lastRender !== fingerprint) {
@@ -236,6 +259,5 @@ async function initialize() {
     if (info.phase !== "lobby") { $("create-room").disabled = true; notice("This round has already started. Ask the facilitator for a fresh invitation on replay."); }
   }
 }
-setInterval(() => { updateTimer(); if (snapshot?.phase === "active" && snapshot.endsAt <= Date.now()) refresh(); }, 1000);
-setInterval(() => { if (snapshot && document.visibilityState === "visible") refresh(); }, 15000);
+setInterval(updateTimer, 1000);
 initialize().catch(error => notice(error.message));

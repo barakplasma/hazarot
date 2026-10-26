@@ -44,3 +44,15 @@ disposable and verify the normal cluster filesystem before trusting retained dat
 The earlier minimal spike established Agents routing, state synchronization,
 scheduling, and graceful restart recovery on local celld. The phase-zero suite
 adds application behavior; it does not establish production readiness.
+
+## Current update: analytics, transport, and characters
+
+The local celld suite passes 20 checks, including character-specific SDK Agents,
+private context exclusion, character memory across graceful restart and room
+isolation, personalized WebSocket state, and large snapshot chunking. PostHog
+payload tests inspect actual SDK requests to a local ingestion fixture and verify
+that room IDs and participant names remain while credentials and dialogue do not.
+The runtime smoke test also checks fresh CSP nonces, allowed analytics endpoints,
+and the absence of unsafe-inline/unsafe-eval. Browser and image validation for
+this update are recorded in its GitHub Actions run; local browser execution remains
+subject to the executor limitation described above.

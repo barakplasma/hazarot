@@ -26,6 +26,14 @@ export function parseScenario(markdown: string): Scenario {
   const unique = (xs: { id: string }[], label: string) => {
     if (new Set(xs.map(x => x.id)).size !== xs.length || xs.some(x => !/^[a-z0-9-]+$/.test(x.id))) throw new Error(`Duplicate or invalid ${label} ID`);
   };
+  if (s.characters !== undefined) {
+    if (!Array.isArray(s.characters) || s.characters.length > 8) throw new Error("Invalid characters");
+    unique(s.characters, "character");
+    if (new Set(s.characters.map(c => c.name.toLowerCase())).size !== s.characters.length) throw new Error("Duplicate character name");
+    for (const c of s.characters) for (const field of ["name", "knowledge", "instruction", "fallback"] as const) {
+      if (typeof c[field] !== "string" || !c[field].trim() || c[field].length > (field === "name" ? 80 : 2000) || (field === "name" && /[\r\n:@]/.test(c[field]))) throw new Error(`Invalid character ${c.id}: ${field}`);
+    }
+  }
   unique(s.roles, "role"); unique(s.actions, "action"); unique(s.endings, "ending"); unique(s.developments, "development");
   if (!s.roles.length || !s.endings.length) throw new Error("Roles and endings must be nonempty");
   const roles = new Set(s.roles.map(r => r.id));
@@ -45,6 +53,7 @@ export function parseScenario(markdown: string): Scenario {
   for (const end of s.endings) if (!["declaration", "world", "terminal"].includes(end.kind) || !end.assessment) throw new Error(`Invalid ending ${end.id}`);
   for (const dev of s.developments) {
     if (!Number.isFinite(dev.minute) || dev.minute < 0 || !dev.text) throw new Error(`Invalid development ${dev.id}`);
+    if (dev.speaker !== undefined && (typeof dev.speaker !== "string" || !dev.speaker.trim() || dev.speaker.length > 80 || /[\r\n:]/.test(dev.speaker))) throw new Error(`Invalid development speaker ${dev.id}`);
     if (dev.requires?.some(f => !flags.has(f))) throw new Error(`Unknown development prerequisite ${dev.id}`);
   }
   for (const o of s.observe) if (!flags.has(o.flag) || !o.label || !o.reflection) throw new Error("Invalid observation");
@@ -53,6 +62,7 @@ export function parseScenario(markdown: string): Scenario {
 
 export function overview(s: Scenario) {
   return { id: s.id, title: s.title, category: s.category, summary: s.summary, version: s.version,
+    characters: (s.characters || []).map(({ id, name }) => ({ id, name })),
     exercise_minutes: s.exercise_minutes, debrief_minutes: s.debrief_minutes, briefing: s.briefing,
     roles: s.roles.map(({ id, name, responsibility, authority }) => ({ id, name, responsibility, authority })) };
 }

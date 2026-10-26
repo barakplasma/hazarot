@@ -7,6 +7,17 @@ version: 1
 exercise_minutes: 12
 debrief_minutes: 5
 summary: A dependency update becomes a credential incident. Agree ownership, contain the exposure, and communicate a defensible recovery.
+characters:
+  - id: release-manager
+    name: Release manager
+    knowledge: A release is waiting. You do not know the audit findings or whether the affected runner is safe.
+    instruction: Ask for an owner, a confirmed decision, and the next update. Do not approve a runner restart yourself.
+    fallback: A release is waiting. Who owns the decision, what is confirmed, and when will you update us?
+  - id: vp-engineering
+    name: VP of Engineering
+    knowledge: You need a confirmed customer-impact assessment and the next update time. You have no private investigation evidence.
+    instruction: Ask concise stakeholder questions. Do not pressure the team to guess or declare success.
+    fallback: Is customer impact confirmed? Please share what is known, what remains uncertain, and the next update time.
 roles:
   - id: commander
     name: Incident commander
@@ -102,10 +113,12 @@ endings:
 developments:
   - id: executive-question
     minute: 4
-    text: "VP of Engineering: Is customer data affected? I need confirmed facts and the next update time. Please avoid guessing."
+    speaker: VP of Engineering
+    text: "Is customer data affected? I need confirmed facts and the next update time. Please avoid guessing."
   - id: release-pressure
     minute: 8
-    text: "Release manager: A release is waiting. Can we restart the old runner now? Who can approve that decision?"
+    speaker: Release manager
+    text: "A release is waiting. Can we restart the old runner now? Who can approve that decision?"
 observe:
   - flag: owner
     label: Explicit coordination owner

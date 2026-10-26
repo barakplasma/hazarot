@@ -1,3 +1,4 @@
+import { gunzipSync } from "node:zlib";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -10,7 +11,7 @@ mkdirSync(".build", { recursive: true });
 const root = process.cwd(), project = mkdtempSync(resolve(".build/integration-")), port = 9987;
 const base = `http://127.0.0.1:${port}`;
 const binary = process.env.CELLD_BIN || (existsSync(".tools/bin/celld") ? resolve(".tools/bin/celld") : "celld");
-const checks = [], sockets = [], modelRequests = [];
+const checks = [], sockets = [], modelRequests = [], analyticsRequests = [];
 let child, modelDelay = 0, modelFailure = false;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = createWriteStream(".build/test-runtime.log");
@@ -24,10 +25,16 @@ mkdirSync(project, { recursive: true });
 cpSync("src", `${project}/src`, { recursive: true }); cpSync("public", `${project}/public`, { recursive: true });
 cpSync("wrangler.jsonc", `${project}/wrangler.jsonc`);
 // Test-only scenario accelerates time without exposing a runtime override endpoint.
-const timerScenario = { ...offsite, id: "timer-probe", exercise_minutes: .035, developments: [{ id: "early", minute: .008, text: "TEST development fired" }] };
+const timerScenario = { ...offsite, id: "timer-probe", exercise_minutes: .035, developments: [{ id: "early", minute: .008, speaker: "Release manager", text: "TEST development fired" }] };
 writeFileSync(`${project}/src/catalog.generated.ts`, `import type {Scenario} from './types';export const catalog: Scenario[]=${JSON.stringify([incident, offsite, timerScenario])};`);
 
 const model = createServer(async (req, res) => {
+  if (req.url === "/batch/") {
+    const chunks = []; for await (const part of req) chunks.push(part);
+    const bytes = Buffer.concat(chunks);
+    analyticsRequests.push(JSON.parse((req.headers["content-encoding"] === "gzip" ? gunzipSync(bytes) : bytes).toString()));
+    res.setHeader("content-type", "application/json"); res.end("{}"); return;
+  }
   let raw = ""; for await (const part of req) raw += part;
   modelRequests.push(JSON.parse(raw));
   await sleep(modelDelay);
@@ -36,7 +43,7 @@ const model = createServer(async (req, res) => {
   res.end(JSON.stringify({ id: "fixture", object: "chat.completion", created: Math.floor(Date.now()/1000), model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: "Ask the decision owner to acknowledge your request, then agree a next-update time. [TEST MODEL]" }, finish_reason: "stop" }], usage: { prompt_tokens: 20, completion_tokens: 15, total_tokens: 35 } }));
 });
 await new Promise(r => model.listen(0, "127.0.0.1", r));
-writeFileSync(`${project}/.dev.vars`, `MODEL_BASE_URL=http://127.0.0.1:${model.address().port}/v1\nMODEL_NAME=fixture\n`);
+writeFileSync(`${project}/.dev.vars`, `MODEL_BASE_URL=http://127.0.0.1:${model.address().port}/v1\nMODEL_NAME=fixture\nPOSTHOG_ENABLED=true\nPOSTHOG_API_HOST=http://127.0.0.1:${model.address().port}\n`);
 
 async function wait(fn, timeout = 12000) { const until = Date.now()+timeout; let error; while(Date.now()<until) { try { const v=await fn(); if(v) return v; } catch(e) { error=e; } await sleep(100); } throw new Error(`Timed out: ${error?.message || "condition"}`); }
 async function api(path, body, token, expected = 200, headers = {}) {
@@ -72,9 +79,11 @@ try {
 
   const ws=new WebSocket(`ws://127.0.0.1:${port}${r.path}?token=${r.token}`); sockets.push(ws); const frames=[];
   ws.on("message",data=>{try{frames.push(JSON.parse(data.toString()));}catch{}}); await once(ws,"open");
-  await cmd(r,"start"); await wait(()=>frames.some(f=>f.type==="refresh"));
+  await cmd(r,"start"); await wait(()=>frames.some(f=>f.type==="snapshot" && f.snapshot.phase==="active"));
+  assert(frames.some(f=>f.type==="snapshot" && f.snapshot.me.id===s.me.id));
+  assert(!frames.some(f=>f.snapshot?.roleCards?.some(r=>r.id==="security")));
   assert(!JSON.stringify(frames).includes("groundTruth"));
-  passed("Authenticated WebSocket notifications do not expose internal state");
+  passed("Authenticated WebSockets carry personalized state and messages without leaking another role context");
   await cmd(r,"pause",{},sam.token,403);
   await cmd(r,"action",{actionId:"revoke",confirmed:true},r.token,403);
   await cmd(r,"action",{actionId:"isolate",confirmed:true},lee.token,409);
@@ -105,9 +114,25 @@ try {
   assert(state.messages.some(m=>m.author==="AI coach"&&m.text.includes("TEST MODEL")));
   const prompt=JSON.stringify(modelRequests.at(-1)); assert(!prompt.includes("PRIVATE-SAM-CANARY")); assert(!prompt.includes("groundTruth"));
   passed("Real AI SDK calls a local OpenAI-compatible fixture with scoped context");
+  await api("/agents/character/not-public", undefined, undefined, 404);
+  await cmd(r, "message", { text: "@Release manager Who owns the release decision?" });
+  await wait(async () => (await snap(r)).messages.some(m => m.author === "Release manager - ai"));
+  const releasePrompt = JSON.parse(modelRequests.at(-1).messages.at(-1).content);
+  assert.equal(releasePrompt.character.id, "release-manager"); assert.equal(releasePrompt.memory.length, 0);
+  assert(!JSON.stringify(releasePrompt).includes("PRIVATE-SAM-CANARY"));
+  assert(!JSON.stringify(releasePrompt).includes(incident.characters.find(c => c.id === "vp-engineering").instruction));
+  await cmd(r, "message", { text: "@VP of Engineering What update do you need?" });
+  await wait(async () => (await snap(r)).messages.some(m => m.author === "VP of Engineering - ai"));
+  const vpPrompt = JSON.parse(modelRequests.at(-1).messages.at(-1).content);
+  assert.equal(vpPrompt.character.id, "vp-engineering"); assert.equal(vpPrompt.memory.length, 0);
+  passed("Each fictional character has an internal SDK Agent and isolated private context");
   await cmd(r,"pause"); const paused=await snap(r); await sleep(250); assert.equal((await snap(r)).elapsedMs,paused.elapsedMs);
   await stop(); await start(); state=await snap(r); assert.equal(state.phase,"paused"); assert(state.messages.some(m=>m.text===msg.text));
   await cmd(r,"resume");
+  const priorReplies = (await snap(r)).messages.filter(m => m.author === "Release manager - ai").length;
+  await cmd(r, "message", { text: "@Release manager What do you still need?" });
+  await wait(async () => (await snap(r)).messages.filter(m => m.author === "Release manager - ai").length > priorReplies);
+  assert(JSON.parse(modelRequests.at(-1).messages.at(-1).content).memory.some(t => t.question.includes("Who owns the release decision?")));
   passed("Pause freezes the clock; participant state and transcript survive restart");
   state=await cmd(r,"end",{endingId:"all-clear",confirmed:true}); assert.equal(state.phase,"debrief"); assert(state.messages.some(m=>m.author==="Debrief"&&m.text.includes("[#")));
   await cmd(r,"action",{actionId:"collect-impact",confirmed:true},lee.token,409);
@@ -126,9 +151,15 @@ try {
   const canceled=await create("offsite",["manager"]); await cmd(canceled,"start"); state=await cmd(canceled,"end",{endingId:"canceled",confirmed:true}); assert.equal(state.ended.reason,"canceled");
   passed("Second domain supports verified world endings and deliberate cancellation");
   const timed=await create("timer-probe",["manager"]); await cmd(timed,"start");
-  await wait(async()=> (await snap(timed)).messages.some(m=>m.text==="TEST development fired"));
+  await wait(async()=> (await snap(timed)).messages.some(m=>m.text==="TEST development fired" && m.author==="Release manager - ai"));
   state=await wait(async()=>{const s=await snap(timed);return s.phase==="debrief"&&s;}); assert.equal(state.ended.reason,"timeout");
-  passed("Scheduled development and actual timeout transition execute");
+  passed("Scheduled developments use the AI role as author, and timeout transitions execute");
+  await wait(() => analyticsRequests.some(r => r.batch?.some(e => e.properties?.operation === "coach_completed")));
+  const events = analyticsRequests.flatMap(r => r.batch || []);
+  assert(events.some(e => e.properties.room_id === r.room && e.properties.participant_name === "Amira"));
+  const wire = JSON.stringify(events);
+  for (const secret of [r.token, r.invite, "PRIVATE-SAM-CANARY", "What should I communicate next?"]) assert(!wire.includes(secret));
+  passed("Real celld delivers PostHog events with room IDs and names, excluding credentials and message bodies");
 
   const late=await create("offsite",["manager"]); await cmd(late,"start"); modelDelay=600;
   const pending=cmd(late,"coach",{question:"Help me decide what to ask."}); await sleep(120);
@@ -142,6 +173,22 @@ try {
   for(let i=1;i<10;i++) await api(capacity.path,{op:"join",invite:capacity.invite,name:`P${i}`,roles:["planner"]});
   await api(capacity.path,{op:"join",invite:capacity.invite,name:"Overflow",roles:["planner"]},undefined,409);
   passed("Room supports ten participants and rejects an eleventh");
+  const otherRoom = await create("ci-credentials", ["commander"]); await cmd(otherRoom, "start");
+  await cmd(otherRoom, "message", { text: "@Release manager Are you available?" });
+  await wait(async () => (await snap(otherRoom)).messages.some(m => m.author === "Release manager - ai"));
+  assert.equal(JSON.parse(modelRequests.at(-1).messages.at(-1).content).memory.length, 0);
+  passed("Character memory survives restart and remains isolated between rooms");
+  const largeWs = new WebSocket(`ws://127.0.0.1:${port}${r.path}?token=${r.token}`); sockets.push(largeWs);
+  largeWs.on("message", data => { try { frames.push(JSON.parse(data.toString())); } catch {} }); await once(largeWs, "open");
+  const before = frames.length;
+  for (let i = 0; i < 8; i++) await cmd(r, "message", { text: "Long transcript fixture " + "x".repeat(3900) });
+  await wait(() => frames.slice(before).some(f => f.type === "snapshot_chunk"));
+  const chunks = frames.filter(f => f.type === "snapshot_chunk");
+  const latest = chunks.filter(f => f.revision === Math.max(...chunks.map(f => f.revision)));
+  await wait(() => latest.length === latest[0]?.total);
+  const rebuilt = JSON.parse(latest.sort((a,b) => a.index-b.index).map(f => f.data).join(""));
+  assert.equal(rebuilt.me.id, s.me.id); assert(rebuilt.messages.some(m => m.text.startsWith("Long transcript fixture")));
+  passed("Large WebSocket histories are chunked and reassembled without HTTP polling");
 
   writeFileSync("test-results.json",JSON.stringify({passed:true,checks,model:"Local protocol fixture, not live model inference",runtime:"celld 0.6.3, agents 0.30.1",at:new Date().toISOString()},null,2)+"\n");
   console.log(`${checks.length} checks passed`);

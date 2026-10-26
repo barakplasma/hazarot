@@ -1,0 +1,30 @@
+import { gunzipSync } from 'node:zlib';
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+import { safeDetails, sanitizeBrowserEvent } from '../src/analytics/config.js';
+await build({ entryPoints: ['src/analytics/server.ts'], outfile: '.build/analytics-test.mjs', bundle: true, format: 'esm', platform: 'browser', conditions: ['workerd'] });
+const { captureServer } = await import('../.build/analytics-test.mjs');
+const sensitive = { room_id: 'a1b2c3d4', scenario_id: 'ci-credentials', phase: 'active', participant_count: 2, operation: 'coach_completed', duration_ms: 42, coach_source: 'model', token: 'secret', participant_name: 'Amira', text: 'private chat', question: 'private prompt', invite: 'invitation-secret', MODEL_API_KEY: 'INFERENCE_KEY_SENTINEL' };
+const event = sanitizeBrowserEvent({ event: 'rehearsal_ui_command', properties: { ...sensitive, $current_url: 'https://example.test/?invite=secret', $referrer: 'https://example.test/?token=secret', $set: { participant_name: 'Amira' }, $initial_current_url: 'https://example.test/?invite=secret', distinct_id: 'random-anonymous-id' } });
+for (const value of ['invitation-secret', 'INFERENCE_KEY_SENTINEL', 'private chat', 'private prompt', '?invite=', '?token=', '$set']) assert(!JSON.stringify(event).includes(value));
+assert.equal(event.properties.room_id, 'a1b2c3d4');
+assert.equal(event.properties.participant_name, 'Amira');
+assert.equal(event.properties.$current_url, 'https://hazarot.526462738.xyz/');
+assert.equal(sanitizeBrowserEvent({event: '$snapshot', properties: sensitive}), null);
+assert(!('operation' in safeDetails({operation: 'some secret with spaces'})));
+const calls = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => { calls.push({url: String(url), body: options.body}); return new Response('{}', {status: 200, headers: {'content-type': 'application/json'}}); };
+try {
+  await captureServer({}, 'rehearsal_server_event', sensitive);
+  assert.equal(calls.length, 0, 'Disabled server analytics must make no requests');
+  await captureServer({ POSTHOG_ENABLED: 'true' }, 'rehearsal_server_event', sensitive);
+  assert.equal(calls.length, 1);
+  const raw = Buffer.from(await calls[0].body.arrayBuffer());
+  const wire = raw[0] === 31 && raw[1] === 139 ? gunzipSync(raw).toString() : raw.toString();
+  for (const value of ['invitation-secret', 'INFERENCE_KEY_SENTINEL', 'private chat', 'private prompt']) assert(!wire.includes(value));
+  assert(wire.includes('a1b2c3d4')); assert(wire.includes('coach_completed'));
+  globalThis.fetch = async () => { throw new Error('offline'); };
+  await captureServer({ POSTHOG_ENABLED: 'true' }, 'rehearsal_server_event', sensitive);
+} finally { globalThis.fetch = realFetch; }
+console.log('PASS browser and server metadata retain room IDs, exclude content and credentials, and tolerate analytics outages');

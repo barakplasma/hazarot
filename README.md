@@ -188,3 +188,51 @@ bucket-backed fleet and validate recovery separately; do not scale this manifest
   imports, thread ACLs, and measured human learning outcomes are outside phase zero.
 - There is no built-in retention/deletion UI. The local `.celld/` directory holds
   rehearsal data and should be treated accordingly.
+
+### Analytics
+
+Optional PostHog analytics use the supplied public project key and US ingestion host.
+The browser tracks page views and successful UI commands on `hazarot.526462738.xyz`;
+celld tracks room creation, joins, committed commands, round endings, and coaching
+completion/fallback with the official `posthog-node/edge` SDK. Set the Worker binding
+`POSTHOG_ENABLED=true` to enable server events (the container entrypoint translates
+this environment variable). It is off by default for local and test runs.
+
+Allowed metadata includes room ID, participant ID and name, scenario ID, phase,
+participant count, operation, ending reason, and coaching duration/source. No
+invitation/session tokens, inference credentials, chat text, coaching questions,
+model responses, or arbitrary request properties are sent. Browser URLs and referrers
+are removed or replaced with the root URL before sending. Autocapture, session
+replay, error capture, flags, surveys, and external SDK scripts are disabled. Browser
+identity is memory-only; server events use the room ID as their analytics identity.
+Analytics is best effort, with no server retries and a two-second timeout, and is
+never required for a rehearsal to complete. The project key is public, not a secret.
+
+The CSP allows Cloudflare's analytics beacon and PostHog ingestion. Each HTML
+response carries a fresh CSP nonce for Cloudflare JavaScript detections, with
+`Cache-Control: no-store`; `unsafe-inline` and `unsafe-eval` remain disallowed.
+
+For a fictional coworker in a timed development, set `speaker: Release manager`
+and put only dialogue in `text`. The transcript author is `Release manager - ai`;
+omitting `speaker` leaves the author as `Game master`. Existing messages from
+these named scenario developments are upgraded when rooms load; human messages
+and ordinary narration are unchanged.
+
+### Real-time transport and fictional colleagues
+
+Authenticated WebSockets deliver a personalized full snapshot on connection and
+on every committed update. Reconnection resynchronizes from the durable record;
+revision checks prevent stale HTTP command responses overwriting newer updates.
+Large snapshots are chunked below the runtime's WebSocket frame limit. HTTP is
+used for initial loading and commands, with no periodic snapshot polling.
+
+Scenario front matter can define up to eight `characters`, each with `id`, `name`,
+`knowledge`, `instruction`, and `fallback`. Address one at the start of a public
+message, e.g. `@Release manager What update do you need?`. Each character gets its
+own Cloudflare SDK Agent, addressed by room ID + character ID, with private SQL
+memory separate from the coach and other characters. It receives only its profile,
+its own past turns, and recent Coordination/current-public-thread messages. No
+human personal threads, other character profiles, or hidden scenario ground truth
+are passed. Model calls are bounded, with authored fallback and no tools. Characters
+cannot commit simulation actions or endings. Pending replies are discarded if the
+round pauses or ends. Character Agents are inaccessible through public routes.

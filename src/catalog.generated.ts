@@ -10,6 +10,22 @@ export const catalog: Scenario[] = [
     "exercise_minutes": 12,
     "debrief_minutes": 5,
     "summary": "A dependency update becomes a credential incident. Agree ownership, contain the exposure, and communicate a defensible recovery.",
+    "characters": [
+      {
+        "id": "release-manager",
+        "name": "Release manager",
+        "knowledge": "A release is waiting. You do not know the audit findings or whether the affected runner is safe.",
+        "instruction": "Ask for an owner, a confirmed decision, and the next update. Do not approve a runner restart yourself.",
+        "fallback": "A release is waiting. Who owns the decision, what is confirmed, and when will you update us?"
+      },
+      {
+        "id": "vp-engineering",
+        "name": "VP of Engineering",
+        "knowledge": "You need a confirmed customer-impact assessment and the next update time. You have no private investigation evidence.",
+        "instruction": "Ask concise stakeholder questions. Do not pressure the team to guess or declare success.",
+        "fallback": "Is customer impact confirmed? Please share what is known, what remains uncertain, and the next update time."
+      }
+    ],
     "roles": [
       {
         "id": "commander",
@@ -190,12 +206,14 @@ export const catalog: Scenario[] = [
       {
         "id": "executive-question",
         "minute": 4,
-        "text": "VP of Engineering: Is customer data affected? I need confirmed facts and the next update time. Please avoid guessing."
+        "speaker": "VP of Engineering",
+        "text": "Is customer data affected? I need confirmed facts and the next update time. Please avoid guessing."
       },
       {
         "id": "release-pressure",
         "minute": 8,
-        "text": "Release manager: A release is waiting. Can we restart the old runner now? Who can approve that decision?"
+        "speaker": "Release manager",
+        "text": "A release is waiting. Can we restart the old runner now? Who can approve that decision?"
       }
     ],
     "observe": [
@@ -244,6 +262,22 @@ export const catalog: Scenario[] = [
     "exercise_minutes": 10,
     "debrief_minutes": 5,
     "summary": "Forty colleagues are waiting for transport. Coordinate access needs, budget, the venue, and a clear decision under pressure.",
+    "characters": [
+      {
+        "id": "venue-coordinator",
+        "name": "Venue coordinator",
+        "knowledge": "The venue can accommodate a 45-minute delay if the team confirms a revised arrival time before booking.",
+        "instruction": "Coordinate the venue schedule without claiming a transport booking or headcount.",
+        "fallback": "We can accommodate a 45-minute delay. What arrival time should we plan around, and who will confirm it?"
+      },
+      {
+        "id": "colleague",
+        "name": "Colleague",
+        "knowledge": "You heard a rumor that the event was canceled. You do not know the confirmed plan or other participants' access needs.",
+        "instruction": "Ask for the official participant-facing plan. Do not invent constraints or decide to end the exercise.",
+        "fallback": "I heard the event might be canceled. What is the confirmed plan, and who is giving the official update?"
+      }
+    ],
     "roles": [
       {
         "id": "planner",
@@ -413,12 +447,14 @@ export const catalog: Scenario[] = [
       {
         "id": "venue-pressure",
         "minute": 3,
-        "text": "Venue coordinator: Please give us an agreed arrival time. Should we delay the first activity?"
+        "speaker": "Venue coordinator",
+        "text": "Please give us an agreed arrival time. Should we delay the first activity?"
       },
       {
         "id": "rumor",
         "minute": 6,
-        "text": "Colleague: I heard the whole event is canceled. Should I go home? Is there an official update?"
+        "speaker": "Colleague",
+        "text": "I heard the whole event is canceled. Should I go home? Is there an official update?"
       }
     ],
     "observe": [

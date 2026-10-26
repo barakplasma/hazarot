@@ -23,6 +23,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/celld-bin/celld"
           echo "$RUNNER_TEMP/celld-bin" >> "$GITHUB_PATH"
       - run: npm run build
+      - run: npm run test:analytics
       - run: npm run typecheck
       - run: npm test
       - run: npm run build:runtime

@@ -1,11 +1,13 @@
+import type { CharacterProfile } from "./character";
 export type Role = { id: string; name: string; responsibility: string; authority: string; knowledge: string; hint: string };
 export type Action = { id: string; label: string; roles: string[]; requires?: string[]; sets: string[]; result: string; end?: string; scope?: "thread" | "room" };
 export type Ending = { id: string; label: string; kind: "declaration" | "world" | "terminal"; roles: string[]; requires?: string[]; assessment: string };
 export type Scenario = {
   id: string; title: string; category: string; author: string; version: number;
   exercise_minutes: number; debrief_minutes: number; summary: string;
+  characters?: CharacterProfile[];
   roles: Role[]; actions: Action[]; endings: Ending[];
-  developments: { id: string; minute: number; text: string; requires?: string[] }[];
+  developments: { id: string; minute: number; text: string; speaker?: string; requires?: string[] }[];
   observe: { flag: string; label: string; reflection: string }[];
   briefing: string; groundTruth: string; debrief: string; template: string;
 };

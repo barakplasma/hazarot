@@ -10,7 +10,8 @@
     "test": "node scripts/test.mjs",
     "test:browser": "node scripts/browser-test.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
-    "test:runtime": "node scripts/runtime-smoke.mjs"
+    "test:runtime": "node scripts/runtime-smoke.mjs",
+    "test:analytics": "node scripts/analytics-test.mjs"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +21,8 @@
     "@ai-sdk/openai-compatible": "2.0.0",
     "agents": "0.30.1",
     "ai": "6.0.0",
+    "posthog-js": "1.438.23",
+    "posthog-node": "5.57.2",
     "yaml": "2.9.0"
   },
   "devDependencies": {

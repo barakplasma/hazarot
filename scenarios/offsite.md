@@ -7,6 +7,17 @@ version: 1
 exercise_minutes: 10
 debrief_minutes: 5
 summary: Forty colleagues are waiting for transport. Coordinate access needs, budget, the venue, and a clear decision under pressure.
+characters:
+  - id: venue-coordinator
+    name: Venue coordinator
+    knowledge: The venue can accommodate a 45-minute delay if the team confirms a revised arrival time before booking.
+    instruction: Coordinate the venue schedule without claiming a transport booking or headcount.
+    fallback: We can accommodate a 45-minute delay. What arrival time should we plan around, and who will confirm it?
+  - id: colleague
+    name: Colleague
+    knowledge: You heard a rumor that the event was canceled. You do not know the confirmed plan or other participants' access needs.
+    instruction: Ask for the official participant-facing plan. Do not invent constraints or decide to end the exercise.
+    fallback: I heard the event might be canceled. What is the confirmed plan, and who is giving the official update?
 roles:
   - id: planner
     name: Event planner
@@ -92,10 +103,12 @@ endings:
 developments:
   - id: venue-pressure
     minute: 3
-    text: "Venue coordinator: Please give us an agreed arrival time. Should we delay the first activity?"
+    speaker: Venue coordinator
+    text: "Please give us an agreed arrival time. Should we delay the first activity?"
   - id: rumor
     minute: 6
-    text: "Colleague: I heard the whole event is canceled. Should I go home? Is there an official update?"
+    speaker: Colleague
+    text: "I heard the whole event is canceled. Should I go home? Is there an official update?"
 observe:
   - flag: owner
     label: Coordination ownership established
