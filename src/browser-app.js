@@ -1,4 +1,4 @@
-import { trackCommand } from "/analytics.js";
+import { trackCommand } from "./analytics/browser.js";
 const $ = (id) => document.getElementById(id);
 const make = (tag, text, className) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (className) e.className = className; return e; };
 const params = new URLSearchParams(location.search);

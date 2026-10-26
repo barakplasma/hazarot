@@ -20,7 +20,9 @@ try {
   const catalog = await (await fetch(base + "/api/scenarios")).json();
   assert.equal(catalog.coachMode, "model"); assert.equal(catalog.scenarios.length, 2);
   const root = await fetch(base + "/"); assert.equal(root.status, 200);
-  assert((await root.text()).includes("Practice working together"));
+  const html = await root.text();
+  assert(html.includes("Practice working together"));
+  assert.match(html, /src="\/app\.js\?v=[a-f0-9]{16}"/);
   const csp = root.headers.get("content-security-policy");
   assert(csp.includes("https://static.cloudflareinsights.com"));
   assert(csp.includes("https://us.i.posthog.com"));
@@ -29,7 +31,7 @@ try {
   const second = await fetch(base + "/");
   assert.notEqual(csp, second.headers.get("content-security-policy"), "HTML nonces must change on every response");
   assert.equal(root.headers.get("cache-control"), "no-store");
-  const analytics = await fetch(base + "/analytics.js");
+  const analytics = await fetch(base + "/app.js");
   assert.equal(analytics.status, 200); assert((await analytics.text()).includes("phc_"));
   const created = await fetch(base + "/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenarioId: "offsite", name: "Runtime probe", roles: ["manager"] }) });
   assert.equal(created.status, 200); const run = await created.json();

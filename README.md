@@ -236,3 +236,6 @@ human personal threads, other character profiles, or hidden scenario ground trut
 are passed. Model calls are bounded, with authored fallback and no tools. Characters
 cannot commit simulation actions or endings. Pending replies are discarded if the
 round pauses or ends. Character Agents are inaccessible through public routes.
+
+The browser source is `src/browser-app.js`. The build bundles the SDK with the UI
+and adds a content hash to the script URL, preventing a stale client after rollout.
