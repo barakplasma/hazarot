@@ -27,6 +27,16 @@ so the actual interface can be checked on a normal runner.
 - Docker build, Kubernetes deployment, abrupt-crash consistency, multi-node
   failover, or production object-storage compatibility.
 
+## Repeat-run finding
+
+A later test invocation reusing a development store reported `database disk
+image is malformed`, followed by celld refusing writes with `DurabilityUnproven`.
+The cause was not established. The harness now gives each invocation a fresh,
+isolated store while still restarting against that same store within its recovery
+test. This prevents independent test invocations sharing old state; it is not a
+claim that the underlying corruption issue has been fixed. Keep phase zero
+disposable and verify the normal cluster filesystem before trusting retained data.
+
 The earlier minimal spike established Agents routing, state synchronization,
 scheduling, and graceful restart recovery on local celld. The phase-zero suite
 adds application behavior; it does not establish production readiness.

@@ -40,11 +40,6 @@ spec:
           env:
             - name: HOST
               value: 0.0.0.0
-            - name: ROOM_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: rehearsal-access
-                  key: ROOM_ACCESS_KEY
           envFrom:
             - secretRef:
                 name: rehearsal-model

@@ -60,8 +60,6 @@ MODEL_BASE_URL=http://inference.internal:8000/v1
 MODEL_NAME=your-model-name
 # Optional if your inference server requires it:
 MODEL_API_KEY=your-key
-# Recommended for a shared deployment:
-ROOM_ACCESS_KEY=your-long-random-room-creation-key
 ```
 
 Restart the app after changing configuration. `MODEL_BASE_URL` must include the
@@ -152,8 +150,6 @@ HA design. It requires normal `/proc` support and a writable persistent volume.
 ```sh
 docker build -t rehearsal-poc:0.1.0 .
 # Load/push that image into your cluster's registry and adjust the manifest image.
-kubectl create secret generic rehearsal-access \
-  --from-literal=ROOM_ACCESS_KEY='replace-with-a-long-random-value'
 kubectl apply -f k8s/poc.yaml
 kubectl port-forward service/rehearsal 9876:9876
 ```
@@ -171,8 +167,10 @@ bucket-backed fleet and validate recovery separately; do not scale this manifest
   them. AI context filtering is separate and enforced server-side.
 - Invitation links and participant tokens are bearer capabilities. Tokens persist
   in that browser's local storage. Use trusted pilot groups; this is not SSO.
-- Without `ROOM_ACCESS_KEY`, anyone able to reach the app can create a room.
-  Use the shared key and internal ingress/TLS for a pilot outside localhost.
+- Room access uses the per-room shared invitation secret stored in celld, not a
+  Kubernetes Secret or deployment-wide password. Anyone reaching the app can
+  create a new room; use trusted pilot access at the ingress if limiting room
+  creation and inference usage is needed.
 - Scenarios are trusted, operator-authored files. Client-rendered content uses
   text nodes, never raw scenario HTML. Do not publish the server catalog as assets.
 - Authored observations are not employee scores. Facilitators should challenge

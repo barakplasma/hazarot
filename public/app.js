@@ -71,7 +71,7 @@ $("setup-form").onsubmit = async (event) => {
   try {
     const data = room
       ? await api(`${endpoint()}`, { method: "POST", body: JSON.stringify({ op: "join", name, roles, invite }) })
-      : await api("/api/runs", { method: "POST", headers: { "x-room-key": $("room-key").value }, body: JSON.stringify({ scenarioId: selected.id, name, roles }) });
+      : await api("/api/runs", { method: "POST", body: JSON.stringify({ scenarioId: selected.id, name, roles }) });
     saveSession(data, name); connect(); await refresh();
   } catch (error) { notice(error.message); }
   finally { $("create-room").disabled = false; }
@@ -220,7 +220,6 @@ async function replay() {
 
 async function initialize() {
   const config = await api("/api/scenarios"); scenarios = config.scenarios;
-  $("room-key-label").hidden = !config.requiresRoomKey;
   $("backend-mode").textContent = config.coachMode === "model" ? "Coaching uses a configured model endpoint. All scenario effects remain fictional." : "Runs without external services. Authored coaching is active; an optional internal model endpoint can enrich it.";
   $("scenarios").replaceChildren(...scenarios.map(s => {
     const card = button("", () => showSetup(s), "scenario-card"); card.dataset.scenario = s.id; card.setAttribute("aria-pressed", "false");
@@ -232,7 +231,7 @@ async function initialize() {
   }
   if (room) {
     const info = await api(`${endpoint()}?invite=${encodeURIComponent(invite || "")}`);
-    $("scenarios").hidden = true; $("choose-title").textContent = "You’ve been invited to rehearse"; $("room-key-label").hidden = true;
+    $("scenarios").hidden = true; $("choose-title").textContent = "You’ve been invited to rehearse";
     showSetup(info.scenario, true);
     if (info.phase !== "lobby") { $("create-room").disabled = true; notice("This round has already started. Ask the facilitator for a fresh invitation on replay."); }
   }

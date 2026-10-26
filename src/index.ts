@@ -5,7 +5,7 @@ import { overview } from "./scenario";
 import { coach, modelEnabled, type ModelConfig } from "./coach";
 import type { Run, Participant, Scenario, Message } from "./types";
 
-type Env = ModelConfig & { Rehearsal: DurableObjectNamespace<Rehearsal>; ASSETS: Fetcher; ROOM_ACCESS_KEY?: string };
+type Env = ModelConfig & { Rehearsal: DurableObjectNamespace<Rehearsal>; ASSETS: Fetcher };
 class RequestError extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 function requireThat(condition: unknown, message: string, status = 400): asserts condition { if (!condition) throw new RequestError(message, status); }
 const token = () => crypto.randomUUID() + crypto.randomUUID();
@@ -126,7 +126,6 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       let body: any; try { body = JSON.parse(raw); } catch { throw new RequestError("Invalid JSON"); }
       if (body.op === "init") {
         requireThat(!run, "Room already exists", 409);
-        requireThat(!this.env.ROOM_ACCESS_KEY || request.headers.get("x-room-key") === this.env.ROOM_ACCESS_KEY, "Room access key required", 403);
         const s = catalog.find(s => s.id === body.scenarioId); requireThat(s, "Unknown scenario");
         const room = textField(body.room, 64, "room ID");
         run = { scenarioId: s.id, scenarioVersion: s.version, room, invite: token(), phase: "lobby", participants: [], threads: [{ id: "coordination", title: "Coordination", kind: "coordination" }], messages: [], flags: {}, processed: {}, fired: [], revision: 0, seq: 0, durationMs: s.exercise_minutes * 60000, elapsedMs: 0 };
@@ -245,12 +244,12 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") return response({ ok: true });
-    if (url.pathname === "/api/scenarios") return response({ scenarios: catalog.map(overview), coachMode: modelEnabled(env) ? "model" : "authored", requiresRoomKey: Boolean(env.ROOM_ACCESS_KEY) });
+    if (url.pathname === "/api/scenarios") return response({ scenarios: catalog.map(overview), coachMode: modelEnabled(env) ? "model" : "authored" });
     if (url.pathname === "/api/runs" && request.method === "POST") {
       const room = crypto.randomUUID().slice(0, 8);
       const raw = await request.text(); if (raw.length > 12000) return response({ error: "Request too large" }, 413);
       let body; try { body = JSON.parse(raw); } catch { return response({ error: "Invalid JSON" }, 400); }
-      const init = new Request(new URL(`/agents/rehearsal/${room}`, request.url), { method: "POST", headers: { "content-type": "application/json", "x-room-key": request.headers.get("x-room-key") || "" }, body: JSON.stringify({ ...body, op: "init", room }) });
+      const init = new Request(new URL(`/agents/rehearsal/${room}`, request.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, op: "init", room }) });
       return await routeAgentRequest(init, env) ?? response({ error: "Agent routing failed" }, 500);
     }
     if (url.pathname.startsWith("/agents/")) return await routeAgentRequest(request, env) ?? response({ error: "Unknown route" }, 404);

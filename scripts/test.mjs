@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { mkdirSync, cpSync, writeFileSync, readFileSync, existsSync, createWriteStream } from "node:fs";
+import { mkdirSync, mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync, createWriteStream } from "node:fs";
 import { resolve } from "node:path";
 import WebSocket from "ws";
 
-const root = process.cwd(), project = resolve(".build/integration-project"), port = 9987;
+mkdirSync(".build", { recursive: true });
+const root = process.cwd(), project = mkdtempSync(resolve(".build/integration-")), port = 9987;
 const base = `http://127.0.0.1:${port}`;
 const binary = process.env.CELLD_BIN || (existsSync(".tools/bin/celld") ? resolve(".tools/bin/celld") : "celld");
 const checks = [], sockets = [], modelRequests = [];
@@ -35,7 +36,7 @@ const model = createServer(async (req, res) => {
   res.end(JSON.stringify({ id: "fixture", object: "chat.completion", created: Math.floor(Date.now()/1000), model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: "Ask the decision owner to acknowledge your request, then agree a next-update time. [TEST MODEL]" }, finish_reason: "stop" }], usage: { prompt_tokens: 20, completion_tokens: 15, total_tokens: 35 } }));
 });
 await new Promise(r => model.listen(0, "127.0.0.1", r));
-writeFileSync(`${project}/.dev.vars`, `MODEL_BASE_URL=http://127.0.0.1:${model.address().port}/v1\nMODEL_NAME=fixture\nROOM_ACCESS_KEY=test-room-key\n`);
+writeFileSync(`${project}/.dev.vars`, `MODEL_BASE_URL=http://127.0.0.1:${model.address().port}/v1\nMODEL_NAME=fixture\n`);
 
 async function wait(fn, timeout = 12000) { const until = Date.now()+timeout; let error; while(Date.now()<until) { try { const v=await fn(); if(v) return v; } catch(e) { error=e; } await sleep(100); } throw new Error(`Timed out: ${error?.message || "condition"}`); }
 async function api(path, body, token, expected = 200, headers = {}) {
@@ -52,7 +53,7 @@ async function stop() {
   const done=once(child,"exit"); process.kill(-child.pid,"SIGTERM"); const timer=setTimeout(()=>{try{process.kill(-child.pid,"SIGKILL");}catch{}},3000);
   try{await done;}finally{clearTimeout(timer);}
 }
-async function create(scenarioId, roles, name="Amira") { const result=await api("/api/runs",{scenarioId,name,roles},undefined,200,{"x-room-key":"test-room-key"}); return {...result,path:`/agents/rehearsal/${result.room}`}; }
+async function create(scenarioId, roles, name="Amira") { const result=await api("/api/runs",{scenarioId,name,roles}); return {...result,path:`/agents/rehearsal/${result.room}`}; }
 const cmd=(r,op,more={},t=r.token,status=200)=>api(r.path,{op,commandId:crypto.randomUUID(),...more},t,status);
 const snap=(r,t=r.token)=>api(r.path,undefined,t);
 function passed(label){ checks.push(label); console.log(`PASS ${label}`); }
@@ -60,8 +61,7 @@ function passed(label){ checks.push(label); console.log(`PASS ${label}`); }
 try {
   await start();
   const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,3); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
-  await api("/api/runs",{scenarioId:"offsite",name:"A",roles:["manager"]},undefined,403);
-  passed("Public catalog excludes hidden facts; room creation key enforced");
+  passed("Public catalog excludes hidden scenario facts");
   const r=await create("ci-credentials",["commander"]);
   await api(r.path,undefined,undefined,401); await api(r.path,{op:"join",invite:"wrong",name:"X",roles:["platform"]},undefined,403);
   const sam=await api(r.path,{op:"join",invite:r.invite,name:"Sam",roles:["security"]});
