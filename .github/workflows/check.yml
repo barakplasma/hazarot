@@ -85,7 +85,7 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:19090/health
-          curl -fsS http://127.0.0.1:19090/api/scenarios | jq -e '.coachMode == "model" and (.scenarios | length == 2)'
+          curl -fsS http://127.0.0.1:19090/api/scenarios | jq -e '.coachMode == "model" and (.scenarios | any(.id == "wedding-traffic"))'
           docker exec hazarot-smoke sh -c '! command -v node && ! command -v npm && ! command -v esbuild'
       - name: Container logs and cleanup
         if: always()

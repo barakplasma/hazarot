@@ -20,6 +20,7 @@ try{
   const page=await host.newPage(),peer=await guest.newPage();
   for(const p of [page,peer]){p.on("pageerror",e=>errors.push(e.message));p.on("console",m=>{if(m.type()==="error")errors.push(m.text());});}
   await page.goto(base);await page.getByRole("heading",{name:"Rare situations."}).waitFor();
+  await page.getByRole("heading",{name:"The DJ is stuck in traffic",exact:true}).waitFor();
   await page.screenshot({path:"qa/welcome.png",fullPage:true});
   await page.getByRole("button",{name:/Incident response.*CI credentials exposed/}).click();
   await page.getByLabel("Your name").fill("Amira");await page.getByRole("button",{name:"Create rehearsal room"}).click();

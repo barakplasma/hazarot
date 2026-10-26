@@ -17,6 +17,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = createWriteStream(".build/test-runtime.log");
 const { parseScenario } = await import("../.build/scenario.mjs");
 const incident = parseScenario(readFileSync("scenarios/ci-credentials.md", "utf8"));
+const wedding = parseScenario(readFileSync("scenarios/wedding-traffic.md", "utf8"));
 const offsite = parseScenario(readFileSync("scenarios/offsite.md", "utf8"));
 assert.throws(() => parseScenario("# no metadata"));
 assert.throws(() => parseScenario(readFileSync("scenarios/offsite.md", "utf8").replace("requires: [approved]", "requires: [unknown]")));
@@ -26,7 +27,7 @@ cpSync("src", `${project}/src`, { recursive: true }); cpSync("public", `${projec
 cpSync("wrangler.jsonc", `${project}/wrangler.jsonc`);
 // Test-only scenario accelerates time without exposing a runtime override endpoint.
 const timerScenario = { ...offsite, id: "timer-probe", exercise_minutes: .035, developments: [{ id: "early", minute: .008, speaker: "Release manager", text: "TEST development fired" }] };
-writeFileSync(`${project}/src/catalog.generated.ts`, `import type {Scenario} from './types';export const catalog: Scenario[]=${JSON.stringify([incident, offsite, timerScenario])};`);
+writeFileSync(`${project}/src/catalog.generated.ts`, `import type {Scenario} from './types';export const catalog: Scenario[]=${JSON.stringify([incident, offsite, wedding, timerScenario])};`);
 
 const model = createServer(async (req, res) => {
   if (req.url === "/batch/") {
@@ -67,7 +68,7 @@ function passed(label){ checks.push(label); console.log(`PASS ${label}`); }
 
 try {
   await start();
-  const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,3); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
+  const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,4); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
   passed("Public catalog excludes hidden scenario facts");
   const r=await create("ci-credentials",["commander"]);
   await api(r.path,undefined,undefined,401); await api(r.path,{op:"join",invite:"wrong",name:"X",roles:["platform"]},undefined,403);
@@ -148,6 +149,15 @@ try {
   await cmd(trip,"end",{endingId:"boarded",confirmed:true},trip.token,400);
   for (const actionId of ["establish-owner","needs","quotes","venue","approve","book","communicate","board"]) state=await cmd(trip,"action",{actionId,confirmed:true});
   assert.equal(state.phase,"debrief"); assert.equal(state.ended.reason,"boarded");
+  const weddingRun = await create("wedding-traffic", ["coordinator", "couple-representative", "venue-lead", "guest-liaison"]);
+  await cmd(weddingRun, "start");
+  await cmd(weddingRun, "action", { actionId: "handover", confirmed: true }, weddingRun.token, 409);
+  for (const actionId of ["owner", "supplier-status", "guest-impact", "venue-options", "audio-check", "couple-priorities", "approve-plan", "notify", "handover"]) state = await cmd(weddingRun, "action", { actionId, confirmed: true });
+  assert.equal(state.phase, "debrief"); assert.equal(state.ended.reason, "event-started");
+  assert(state.messages.some(m => m.text.includes("not assumed to have arrived")));
+  const stoppedWedding = await create("wedding-traffic", ["couple-representative"]); await cmd(stoppedWedding, "start");
+  assert.equal((await cmd(stoppedWedding, "end", { endingId: "stop-event", confirmed: true })).ended.reason, "stop-event");
+  passed("Wedding plan requires verified dependencies, approval, communication and handover; cancellation is explicit");
   const canceled=await create("offsite",["manager"]); await cmd(canceled,"start"); state=await cmd(canceled,"end",{endingId:"canceled",confirmed:true}); assert.equal(state.ended.reason,"canceled");
   passed("Second domain supports verified world endings and deliberate cancellation");
   const timed=await create("timer-probe",["manager"]); await cmd(timed,"start");

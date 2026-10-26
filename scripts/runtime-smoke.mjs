@@ -18,7 +18,7 @@ try {
   const deadline = Date.now() + 12000;
   for (;;) { try { if ((await fetch(base + "/health")).ok) break; } catch {} if (Date.now() > deadline) throw new Error("Runtime did not start"); await new Promise(r => setTimeout(r, 100)); }
   const catalog = await (await fetch(base + "/api/scenarios")).json();
-  assert.equal(catalog.coachMode, "model"); assert.equal(catalog.scenarios.length, 2);
+  assert.equal(catalog.coachMode, "model"); assert(catalog.scenarios.some(s => s.id === "wedding-traffic"));
   const root = await fetch(base + "/"); assert.equal(root.status, 200);
   const html = await root.text();
   assert(html.includes("Practice working together"));
