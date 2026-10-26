@@ -47,16 +47,20 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       if (participant) this.pushSnapshot(connection, run, participant);
     }
   }
-  private pushSnapshot(connection: Connection, run: Run, participant: Participant) {
+  private pushSnapshot(connection: Connection, run: Run, participant: Participant, full = false) {
     // Personalized frames: role cards and facilitator invitations are scoped to the recipient.
     // Chunk large histories below the runtime WebSocket message size limit.
-    const data = JSON.stringify(this.snapshot(run, participant)), size = 24000;
+    const state = connection.state as { participantId: string; incremental?: boolean; revision?: number; seq?: number } | null;
+    const next = this.snapshot(run, participant);
+    const incremental = !full && state?.incremental && state.revision === run.revision - 1;
+    const data = JSON.stringify(incremental ? { ...next, messages: next.messages.filter(m => m.id > (state.seq || 0)), incremental: true, baseRevision: state.revision } : next), size = 24000;
     try {
       if (data.length <= size) connection.send(JSON.stringify({ type: "snapshot", snapshot: JSON.parse(data) }));
       else for (let offset = 0; offset < data.length; offset += size) {
         connection.send(JSON.stringify({ type: "snapshot_chunk", revision: run.revision,
           index: offset / size, total: Math.ceil(data.length / size), data: data.slice(offset, offset + size) }));
       }
+      connection.setState({ ...state, participantId: participant.id, revision: run.revision, seq: run.seq });
     } catch { try { connection.close(1011, "Reconnect to resynchronize"); } catch {} }
   }
   private scenario(run: Run): Scenario {
@@ -96,6 +100,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       endings: s.endings.filter(e => e.kind !== "world" && hasRoles(p, e.roles)).map(e => ({ id: e.id, label: e.label, kind: e.kind })),
       durationMs: run.durationMs, elapsedMs: this.elapsed(run), endsAt: run.endsAt, ended: run.ended,
       template: s.template, coachMode: modelEnabled(this.env) ? "model" : "authored",
+      activities: (run.activities || []).filter(a => a.expiresAt > Date.now() && (!a.participant || a.participant === p.id)),
       invite: p.host ? run.invite : undefined };
   }
   private track(run: Run, operation: string, extra: Record<string, string | number> = {}) {
@@ -104,11 +109,43 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       participant_count: run.participants.length, operation, ...extra,
     }));
   }
+  private beginActivity(run: Run, id: string, label: string, thread: string, participant?: string) {
+    run.activities = [...(run.activities || []).filter(a => a.expiresAt > Date.now()), { id, label, thread, participant, startedAt: Date.now(), expiresAt: Date.now() + 30000 }];
+    this.save(run);
+  }
+  private clearActivity(id: string) {
+    const run = this.load();
+    if (run?.activities?.some(a => a.id === id)) { run.activities = run.activities.filter(a => a.id !== id); this.save(run); }
+  }
+  private async answerCoach(run: Run, p: Participant, question: string, activityId: string) {
+    const s = this.scenario(run), own = `personal-${p.id}`, phase = run.phase, startedAt = run.startedAt, start = Date.now();
+    let output = s.roles.filter(r => p.roles.includes(r.id)).map(r => `${r.name}: ${r.hint}`).join("\n\n");
+    output += "\n\nTry: ‘Here is what I know, here is what I do not know, and here is what I need from you.’ Ask for acknowledgment and an owner.";
+    let source = "Authored coach";
+    try {
+      if (modelEnabled(this.env)) {
+        try { output = await coach(this.env, s.roles.filter(r => p.roles.includes(r.id)), p, run.messages, question); source = "AI coach"; }
+        catch { source = "Authored coach · model unavailable"; }
+      }
+      const current = this.load();
+      if (current?.phase === phase && current.startedAt === startedAt) {
+        current.activities = (current.activities || []).filter(a => a.id !== activityId);
+        this.post(current, own, source, output, "coach"); this.save(current);
+        this.track(current, "coach_completed", { participant_name: p.name, participant_id: p.id, coach_source: source === "AI coach" ? "model" : source.includes("unavailable") ? "fallback" : "authored", duration_ms: Date.now() - start });
+      }
+    } finally { this.clearActivity(activityId); }
+  }
   private characterBusy = new Set<string>();
   private async answerCharacter(run: Run, participant: Participant, characterId: string, thread: string, question: string, turnId: string) {
     const character = this.scenario(run).characters?.find(c => c.id === characterId);
-    if (!character || this.characterBusy.has(characterId)) return;
+    if (!character) return;
+    if (this.characterBusy.has(characterId)) {
+      const current = this.load()!;
+      this.post(current, thread, "Game master", `${character.name} - ai is already replying to an earlier message. Please ask this question again after that reply arrives.`);
+      this.save(current); return;
+    }
     this.characterBusy.add(characterId);
+    this.beginActivity(this.load()!, turnId, `${character.name} - ai is preparing a reply`, thread);
     const startedAt = run.startedAt, start = Date.now();
     try {
       const agent = await getAgentByName(this.env.Character, `${run.room}:${character.id}`);
@@ -116,14 +153,19 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       const reply = await agent.reply({ profile: character, turnId, question, messages: visible });
       const current = this.load();
       if (current?.phase !== "active" || current.startedAt !== startedAt) return;
+      current.activities = (current.activities || []).filter(a => a.id !== turnId);
       this.post(current, thread, `${character.name} - ai`, reply.text); this.save(current);
       this.track(current, "character_completed", { participant_name: participant.name, participant_id: participant.id, coach_source: reply.source, duration_ms: Date.now() - start });
-    } catch { /* A character reply cannot undo an accepted human message. */ }
-    finally { this.characterBusy.delete(characterId); }
+    } catch {
+      const current = this.load();
+      if (current?.phase === "active" && current.startedAt === startedAt) { this.post(current, thread, `${character.name} - ai`, "I couldn't prepare a reply. Please ask me again."); this.save(current); }
+    }
+    finally { this.characterBusy.delete(characterId); this.clearActivity(turnId); }
   }
   private elapsed(run: Run) { return run.elapsedMs + (run.phase === "active" && run.startedAt ? Date.now() - run.startedAt : 0); }
   private finish(run: Run, reason: string, label: string, assessment: string, trigger?: number) {
     requireThat(run.phase === "active" || run.phase === "paused", "The round is not active", 409);
+    run.activities = [];
     run.elapsedMs = this.elapsed(run); run.phase = "debrief"; delete run.endsAt; delete run.startedAt;
     run.ended = { reason, label, assessment, trigger, at: Date.now() };
     const s = this.scenario(run);
@@ -159,8 +201,19 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
     let participant: Participant;
     try { participant = this.identify(run, new URL(context.request.url).searchParams.get("token")); }
     catch { connection.close(1008, "Unauthorized"); return; }
-    connection.setState({ participantId: participant.id });
+    connection.setState({ participantId: participant.id, incremental: new URL(context.request.url).searchParams.get("protocol") === "2" });
     this.pushSnapshot(connection, run, participant);
+  }
+  async onMessage(connection: Connection, message: string | ArrayBuffer) {
+    if (typeof message !== "string" || message.length > 24000) return;
+    let frame: any; try { frame = JSON.parse(message); } catch { return; }
+    const run = this.load(), state = connection.state as { participantId?: string } | null;
+    const participant = run?.participants.find(p => p.id === state?.participantId);
+    if (!run || !participant) { connection.close(1008, "Unauthorized"); return; }
+    if (frame.type === "resync") { this.pushSnapshot(connection, run, participant, true); return; }
+    if (frame.type !== "command" || !frame.payload || ["init", "join"].includes(frame.payload.op)) return;
+    const result = await this.onRequest(new Request("https://room.internal/", { method: "POST", headers: { authorization: `Bearer ${participant.token}`, "content-type": "application/json" }, body: JSON.stringify({ ...frame.payload, ackOnly: true }) }));
+    connection.send(JSON.stringify({ type: "command_result", commandId: frame.payload.commandId, status: result.status, data: await result.json() }));
   }
   async onRequest(request: Request): Promise<Response> {
     try {
@@ -200,7 +253,8 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       const p = this.identify(run, request.headers.get("authorization")?.replace(/^Bearer /, "") ?? null);
       const command = textField(body.commandId, 100, "command ID");
       const key = `${p.id}:${command}`;
-      if (Object.hasOwn(run.processed, key)) return response({ duplicate: true, ...this.snapshot(run, p) });
+      const reply = (current: Run) => response(body.ackOnly ? { accepted: true, revision: current.revision, commandId: command } : this.snapshot(current, p));
+      if (Object.hasOwn(run.processed, key)) return response(body.ackOnly ? { accepted: true, duplicate: true, commandId: command, revision: run.revision } : { duplicate: true, ...this.snapshot(run, p) });
       if (run.phase === "active" && this.elapsed(run) >= run.durationMs) { this.finish(run, "timeout", "Time expired", "Time ran out before this command could affect the exercise."); run = this.load()!; }
       const hostOnly = () => requireThat(p.host, "Facilitator permission required", 403);
       const active = () => requireThat(run!.phase === "active", "Start or resume the round first", 409);
@@ -215,7 +269,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
           this.post(run, "coordination", "Game master", "Round started. Establish who coordinates, share what each role knows, and agree your next update. Action cards commit fictional actions; chat alone does not change the world.");
           break;
         case "pause":
-          hostOnly(); active(); run.elapsedMs = this.elapsed(run); run.phase = "paused"; delete run.startedAt; delete run.endsAt;
+          hostOnly(); active(); run.elapsedMs = this.elapsed(run); run.phase = "paused"; run.activities = []; delete run.startedAt; delete run.endsAt;
           this.post(run, "coordination", "Game master", "Round paused by the facilitator. The exercise clock is stopped."); break;
         case "resume":
           hostOnly(); requireThat(run.phase === "paused", "Round is not paused", 409); run.phase = "active"; run.startedAt = Date.now(); run.endsAt = Date.now() + run.durationMs - run.elapsedMs;
@@ -229,7 +283,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
         case "message": {
           requireThat(run.messages.length < 2000, "Round message limit reached", 409);
           const text = textField(body.text, 4000, "message");
-          const m = this.post(run, threadId(), p.name, text, "message", p.id);
+          const m = this.post(run, threadId(), p.name, text, "message", p.id); m.commandId = command;
           if (run.phase === "active" && /\ball clear\b|everyone.{0,12}(on|aboard).{0,8}bus|cancel.{0,15}offsite/i.test(text)) {
             this.post(run, threadId(), "Game master", "Is that a proposal or an ending decision? Use an ending confirmation or a verified scenario action to end play. A declaration and its correctness are assessed separately.", "system", undefined, [m.id]);
           }
@@ -248,7 +302,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
             requireThat(satisfies(run, ending.requires), "Ending is not established", 409);
             run.processed[key] = true; this.finish(run, ending.id, ending.label, ending.assessment, m.id);
             this.track(run, "action", { participant_name: p.name, participant_id: p.id });
-            return response(this.snapshot(run, p));
+            return reply(run);
           }
           break;
         }
@@ -264,7 +318,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
           }
           requireThat(run.phase === "active" || run.phase === "paused", "Round is not active", 409);
           const m = this.post(run, "coordination", p.name, `Confirmed ending: ${label}`, "receipt", p.id);
-          run.processed[key] = true; this.finish(run, reason, label, assessment, m.id); this.track(run, "end", { participant_name: p.name, participant_id: p.id }); return response(this.snapshot(run, p));
+          run.processed[key] = true; this.finish(run, reason, label, assessment, m.id); this.track(run, "end", { participant_name: p.name, participant_id: p.id }); return reply(run);
         }
         case "coach": {
           requireThat(run.phase !== "lobby", "Start the round before asking the coach", 409);
@@ -272,19 +326,11 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
           const recent = run.messages.filter(m => m.thread === own && m.kind === "coach").at(-1);
           requireThat(!recent || Date.now() - recent.at > 1500, "Give the coach a moment before asking again", 429);
           this.post(run, own, p.name, question, "message", p.id);
-          run.processed[key] = true; this.save(run);
-          const phase = run.phase, coachStarted = Date.now();
-          let output = s.roles.filter(r => p.roles.includes(r.id)).map(r => `${r.name}: ${r.hint}`).join("\n\n");
-          output += "\n\nTry: ‘Here is what I know, here is what I do not know, and here is what I need from you.’ Ask for acknowledgment and an owner.";
-          let source = "Authored coach";
-          if (modelEnabled(this.env)) {
-            try { output = await coach(this.env, s.roles.filter(r => p.roles.includes(r.id)), p, run.messages, question); source = "AI coach"; }
-            catch { source = "Authored coach · model unavailable"; }
-          }
-          const current = this.load()!;
-          if (current.phase === phase) { this.post(current, own, source, output, "coach"); this.save(current); }
-          this.track(current, "coach_completed", { participant_name: p.name, participant_id: p.id, coach_source: source === "AI coach" ? "model" : source.includes("unavailable") ? "fallback" : "authored", duration_ms: Date.now() - coachStarted });
-          return response(this.snapshot(current, p));
+          requireThat(!(run.activities || []).some(a => a.participant === p.id && a.expiresAt > Date.now()), "Your coach is already preparing a reply", 429);
+          run.processed[key] = true;
+          this.beginActivity(run, key, "Your coach is preparing a reply", own, p.id);
+          this.ctx.waitUntil(this.answerCoach(run, p, question, key));
+          return reply(this.load()!);
         }
         default: throw new RequestError("Unknown operation");
       }
@@ -298,7 +344,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
         }
       }
       if (["start", "resume"].includes(body.op)) await this.arm(run);
-      return response(this.snapshot(run, p));
+      return reply(run);
     } catch (error) {
       if (error instanceof RequestError) return response({ error: error.message }, error.status);
       console.error("Rehearsal request failed", error instanceof Error ? error.name : "UnknownError");

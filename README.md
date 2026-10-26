@@ -221,10 +221,10 @@ and ordinary narration are unchanged.
 ### Real-time transport and fictional colleagues
 
 Authenticated WebSockets deliver a personalized full snapshot on connection and
-on every committed update. Reconnection resynchronizes from the durable record;
+incremental updates after committed changes. Reconnection resynchronizes from the durable record;
 revision checks prevent stale HTTP command responses overwriting newer updates.
 Large snapshots are chunked below the runtime's WebSocket frame limit. HTTP is
-used for initial loading and commands, with no periodic snapshot polling.
+used for initial loading and command fallback, with no periodic snapshot polling.
 
 Scenario front matter can define up to eight `characters`, each with `id`, `name`,
 `knowledge`, `instruction`, and `fallback`. Address one at the start of a public
@@ -239,3 +239,17 @@ round pauses or ends. Character Agents are inaccessible through public routes.
 
 The browser source is `src/browser-app.js`. The build bundles the SDK with the UI
 and adds a content hash to the script URL, preventing a stale client after rollout.
+
+### Response progress and fast chat
+
+The current browser sends commands over the authenticated WebSocket and receives
+small acknowledgments. A lost acknowledgment retries the same command ID through
+HTTP, preserving deduplication. Protocol-2 clients receive only new messages with
+updated room metadata; reconnect or a revision gap requests a full resynchronization.
+The UI appends new transcript rows instead of rebuilding the history.
+
+Coach requests acknowledge before inference completes. A visible activity bar
+shows saving, connection recovery, and which AI colleague or coach is preparing a
+reply, with elapsed time. Coaching progress is scoped to the requesting participant.
+The draft stays intact if a command fails. Human chat remains usable during AI
+inference; a busy character explicitly asks callers to retry after its current turn.

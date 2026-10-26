@@ -13,7 +13,7 @@ export type Scenario = {
 };
 export type Participant = { id: string; name: string; roles: string[]; token: string; host: boolean };
 export type Thread = { id: string; title: string; kind: "coordination" | "personal" | "investigation" | "meeting"; owner?: string };
-export type Message = { id: number; thread: string; author: string; participant?: string; text: string; at: number; kind: "message" | "system" | "receipt" | "coach"; refs?: number[] };
+export type Message = { id: number; thread: string; author: string; participant?: string; text: string; commandId?: string; at: number; kind: "message" | "system" | "receipt" | "coach"; refs?: number[] };
 export type EndRecord = { reason: string; label: string; trigger?: number; at: number; assessment: string };
 export type Run = {
   scenarioId: string; scenarioVersion: number; room: string; invite: string;
@@ -21,5 +21,6 @@ export type Run = {
   threads: Thread[]; messages: Message[]; flags: Record<string, number>;
   processed: Record<string, unknown>; durationMs: number; elapsedMs: number;
   startedAt?: number; endsAt?: number; ended?: EndRecord; fired: string[];
+  activities?: { id: string; label: string; thread: string; participant?: string; startedAt: number; expiresAt: number }[];
   revision: number; seq: number;
 };

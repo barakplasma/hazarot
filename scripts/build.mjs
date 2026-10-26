@@ -12,4 +12,5 @@ console.log(`Validated ${scenarios.length} Markdown scenarios`);
 
 await build({ entryPoints: ["src/browser-app.js"], outfile: "public/app.js", bundle: true, format: "esm", platform: "browser", target: "es2022", minify: true });
 const clientVersion = createHash("sha256").update(readFileSync("public/app.js")).digest("hex").slice(0, 16);
-writeFileSync("public/index.html", readFileSync("src/index.html", "utf8").replace('src="/app.js"', `src="/app.js?v=${clientVersion}"`));
+const styleVersion = createHash("sha256").update(readFileSync("public/style.css")).digest("hex").slice(0, 16);
+writeFileSync("public/index.html", readFileSync("src/index.html", "utf8").replace('src="/app.js"', `src="/app.js?v=${clientVersion}"`).replace('href="/style.css"', `href="/style.css?v=${styleVersion}"`));

@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { once } from "node:events";
 import { chromium } from "@playwright/test";
-import { mkdirSync, createWriteStream, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, cpSync, createWriteStream, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 mkdirSync("qa",{recursive:true});
 const binary=process.env.CELLD_BIN||(existsSync(".tools/bin/celld")?resolve(".tools/bin/celld"):"celld");
-const child=spawn(binary,["dev",".","--host","127.0.0.1","--port","9988","--no-watch","--logs"],{detached:true,env:{...process.env,PATH:`${process.cwd()}/node_modules/.bin:${process.env.PATH}`},stdio:["ignore","pipe","pipe"]});
+const fixture=createServer(async(req,res)=>{
+  for await (const _ of req) {} await new Promise(r=>setTimeout(r,1800));
+  res.setHeader("content-type","application/json");
+  res.end(JSON.stringify({id:"browser-fixture",object:"chat.completion",created:1,model:"fixture",choices:[{index:0,message:{role:"assistant",content:"Ask the decision owner to acknowledge the next update time."},finish_reason:"stop"}]}));
+});
+await new Promise(r=>fixture.listen(0,"127.0.0.1",r));
+const project=mkdtempSync(resolve(".build/browser-"));
+for(const dir of ["src","public"]) cpSync(dir,`${project}/${dir}`,{recursive:true});
+cpSync("wrangler.jsonc",`${project}/wrangler.jsonc`);
+writeFileSync(`${project}/.dev.vars`,`MODEL_BASE_URL=http://127.0.0.1:${fixture.address().port}/v1\nMODEL_NAME=fixture\n`);
+const child=spawn(binary,["dev",project,"--host","127.0.0.1","--port","9988","--no-watch","--logs"],{detached:true,env:{...process.env,PATH:`${process.cwd()}/node_modules/.bin:${process.env.PATH}`},stdio:["ignore","pipe","pipe"]});
 const log=createWriteStream("qa/browser-runtime.log"); child.stdout.pipe(log,{end:false});child.stderr.pipe(log,{end:false});
 const base="http://127.0.0.1:9988",sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let browser;const checks=[],errors=[];
@@ -35,10 +46,11 @@ try{
   await page.getByRole("button",{name:"Start round",exact:true}).click();
   await page.getByRole("button",{name:"Pause",exact:true}).waitFor();
   pass("Two browser sessions create/join a room and begin a shared round");
+  await page.getByText("● Connected",{exact:true}).waitFor();
+  await peer.getByText("● Connected",{exact:true}).waitFor();
   let pollingRequests = 0;
   for (const context of [host, guest]) await context.route("**/agents/rehearsal/*", route => {
-    if (route.request().method() === "GET") { pollingRequests++; return route.abort(); }
-    return route.continue();
+    pollingRequests++; return route.abort();
   });
   await page.locator("#message").fill("I will coordinate. Sam, please check the token scope and report uncertainty.");
   await page.getByRole("button",{name:"Send",exact:true}).click();
@@ -47,6 +59,7 @@ try{
   await page.getByText("Acknowledged. I will report findings in two minutes.",{exact:true}).waitFor();
   pass("Live messages arrive in both participant browsers");
   await page.locator("#message").fill("@Release manager What do you need from us?"); await page.getByRole("button",{name:"Send",exact:true}).click();
+  await page.getByText(/Release manager - ai is preparing a reply/).waitFor();
   await peer.getByText("Release manager - ai",{exact:true}).waitFor();
   pass("Fictional colleague replies have their own AI author label");
   await page.getByRole("button",{name:"Create a thread",exact:true}).click();await page.locator("#modal-input").fill("Token investigation");await page.getByRole("button",{name:"Confirm",exact:true}).click();
@@ -57,15 +70,20 @@ try{
   pass("Work threads and confirmed role-authorized action receipts synchronize");
   await page.getByRole("button",{name:/Amira · role & coaching/}).click();
   await page.getByRole("button",{name:"Ask coach",exact:true}).click();await page.locator("#modal-input").fill("How do I ask for an update without taking over?");await page.getByRole("button",{name:"Confirm",exact:true}).click();
-  await page.getByText("Authored coach",{exact:true}).waitFor();
+  await page.getByText(/Your coach is preparing a reply/).waitFor();
+  await page.locator("#message").fill("I can keep writing while the coach prepares its reply.");
+  await page.getByRole("button",{name:"Send",exact:true}).click();
+  await page.getByText("I can keep writing while the coach prepares its reply.",{exact:true}).waitFor();
+  await page.getByText("AI coach",{exact:true}).waitFor();
+  pass("AI progress is visible and chat stays usable while inference is pending");
   await page.getByRole("button",{name:"Use status template",exact:true}).click();assert((await page.locator("#message").inputValue()).includes("Next update:"));await page.locator("#message").fill("");
   await page.getByRole("button",{name:"Pause",exact:true}).click();await page.getByRole("button",{name:"Resume",exact:true}).waitFor();await page.getByRole("button",{name:"Resume",exact:true}).click();
   await host.unroute("**/agents/rehearsal/*");
   await guest.unroute("**/agents/rehearsal/*");
-  assert.equal(pollingRequests, 0, "Live updates must use WebSocket without room GET requests");
-  pass("Messages, character replies, actions and pause/resume work with HTTP room reads blocked");
+  assert.equal(pollingRequests, 0, "Commands and updates must use WebSocket without room HTTP requests");
+  pass("Messages, character replies, actions and pause/resume work with all room HTTP requests blocked");
   await page.reload();await page.getByRole("button",{name:"Pause",exact:true}).waitFor();
-  pass("Authored coaching, templates, pause/resume and saved-session reload work");
+  pass("Asynchronous coaching, templates, pause/resume and saved-session reload work");
   await page.getByRole("button",{name:"Coordination",exact:true}).click();
   await page.screenshot({path:"qa/active-desktop.png",fullPage:true});
   await page.setViewportSize({width:390,height:844});
@@ -87,4 +105,4 @@ try{
   assert.deepEqual(errors,[]);
   writeFileSync("browser-results.json",JSON.stringify({passed:true,checks,consoleErrors:errors,at:new Date().toISOString()},null,2)+"\n");
 }catch(error){console.error(error);writeFileSync("browser-results.json",JSON.stringify({passed:false,checks,consoleErrors:errors,error:error.stack},null,2)+"\n");process.exitCode=1;}
-finally{if(browser)await browser.close();if(child.exitCode===null){const done=once(child,"exit");process.kill(-child.pid,"SIGTERM");const t=setTimeout(()=>{try{process.kill(-child.pid,"SIGKILL");}catch{}},3000);await done;clearTimeout(t);}log.end();}
+finally{if(browser)await browser.close();if(child.exitCode===null){const done=once(child,"exit");process.kill(-child.pid,"SIGTERM");const t=setTimeout(()=>{try{process.kill(-child.pid,"SIGKILL");}catch{}},3000);await done;clearTimeout(t);}log.end(); await new Promise(r=>fixture.close(r));}

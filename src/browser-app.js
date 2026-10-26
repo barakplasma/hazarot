@@ -5,25 +5,44 @@ const params = new URLSearchParams(location.search);
 let room = params.get("room"), invite = params.get("invite"), session = room ? JSON.parse(localStorage.getItem(`rehearsal:${room}`) || "null") : null;
 let scenarios = [], selected, snapshot, selectedThread = "coordination", socket, refreshPromise, modalAction;
 let lastRender = "", reconnectAttempts = 0, refreshingAgain = false, snapshotChunks;
+const pendingCommands = new Map();
+let reconnectTimer, resyncRequested = false;
 const endpoint = () => `/agents/rehearsal/${room}`;
 
 function notice(text) { $("notice").textContent = text; $("notice").hidden = !text; }
 async function api(path, options = {}) {
   const res = await fetch(path, { ...options, headers: { "content-type": "application/json", ...(session ? { authorization: `Bearer ${session.token}` } : {}), ...options.headers } });
+  if (!res.headers.get("content-type")?.includes("application/json")) throw new Error("The server is temporarily unavailable or asking for browser verification. Your draft is kept; reload if this continues.");
   const data = await res.json(); if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`); return data;
 }
+function socketCommand(payload) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pendingCommands.delete(payload.commandId); updateActivity(); reject(new Error("Acknowledgment timed out")); }, 8000);
+    pendingCommands.set(payload.commandId, { resolve, reject, timer, operation: payload.op, startedAt: Date.now() });
+    updateActivity();
+    try { socket.send(JSON.stringify({ type: "command", payload })); }
+    catch (error) { clearTimeout(timer); pendingCommands.delete(payload.commandId); reject(error); }
+  });
+}
 async function command(op, payload = {}) {
-  const commandId = crypto.randomUUID();
-  const body = JSON.stringify({ op, ...payload, commandId });
+  const commandId = crypto.randomUUID(), startedAt = Date.now();
+  const envelope = { op, ...payload, commandId };
+  const body = JSON.stringify(envelope);
   let data;
-  try { data = await api(endpoint(), { method: "POST", body }); }
-  catch (error) {
-    // A network retry must reuse the same command ID. Domain errors are shown.
-    if (error instanceof TypeError) data = await api(endpoint(), { method: "POST", body }); else throw error;
+  if (socket?.readyState === WebSocket.OPEN) {
+    try { data = await socketCommand(envelope); }
+    catch (error) { if (error.domain) throw error; }
   }
-  trackCommand({ participant_name: session?.name, participant_id: data.me?.id, room_id: room, scenario_id: data.scenario?.id, operation: op, phase: data.phase, status: "success" });
+  if (!data) {
+    try { data = await api(endpoint(), { method: "POST", body }); }
+    catch (error) {
+      // Every retry reuses the accepted command ID, including lost socket acknowledgments.
+      if (error instanceof TypeError) data = await api(endpoint(), { method: "POST", body }); else throw error;
+    }
+  }
+  trackCommand({ participant_name: session?.name, participant_id: snapshot?.me.id, room_id: room, scenario_id: snapshot?.scenario.id, operation: op, phase: snapshot?.phase, status: "success", duration_ms: Date.now() - startedAt });
   if (data.scenario) applySnapshot(data);
-  return data;
+  updateActivity(); return data;
 }
 async function refresh() {
   if (refreshPromise) { refreshingAgain = true; return refreshPromise; }
@@ -35,16 +54,35 @@ async function refresh() {
 }
 function applySnapshot(next) {
   if (next.room !== room || (snapshot && next.revision < snapshot.revision)) return;
-  snapshot = next; render();
+  if (next.incremental) {
+    if (next.revision === snapshot?.revision) return;
+    if (!snapshot || next.baseRevision !== snapshot.revision) {
+      if (!resyncRequested && socket?.readyState === WebSocket.OPEN) { resyncRequested = true; socket.send(JSON.stringify({ type: "resync" })); }
+      return;
+    }
+    next = { ...next, messages: [...snapshot.messages, ...next.messages] };
+  }
+  resyncRequested = false; snapshot = next; render();
 }
 function connect() {
+  clearTimeout(reconnectTimer);
+  if (!room || !session) return;
   if (socket) { socket.onclose = null; socket.close(); }
-  socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${endpoint()}?token=${encodeURIComponent(session.token)}`);
-  socket.onopen = () => { reconnectAttempts = 0; snapshotChunks = undefined; $("connection").textContent = "● Connected"; };
+  socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${endpoint()}?token=${encodeURIComponent(session.token)}&protocol=2`);
+  socket.onopen = () => { reconnectAttempts = 0; snapshotChunks = undefined; $("connection").textContent = "● Connected"; updateActivity(); };
 
   socket.onmessage = (event) => {
     try {
       const frame = JSON.parse(event.data);
+      if (frame.type === "command_result") {
+        const pending = pendingCommands.get(frame.commandId);
+        if (pending) {
+          clearTimeout(pending.timer); pendingCommands.delete(frame.commandId);
+          if (frame.status >= 400) pending.reject(Object.assign(new Error(frame.data.error || "Command rejected"), { domain: true }));
+          else pending.resolve(frame.data);
+          updateActivity();
+        }
+      }
       if (frame.type === "snapshot") applySnapshot(frame.snapshot);
       if (frame.type === "snapshot_chunk") {
         if (snapshot && frame.revision < snapshot.revision) return;
@@ -60,9 +98,11 @@ function connect() {
   };
   socket.onclose = () => {
     $("connection").textContent = "Reconnecting…";
-    setTimeout(connect, Math.min(1000 * 2 ** reconnectAttempts++, 12000));
+    for (const pending of pendingCommands.values()) { clearTimeout(pending.timer); pending.reject(new Error("Connection interrupted")); }
+    pendingCommands.clear(); updateActivity();
+    reconnectTimer = setTimeout(connect, Math.min(1000 * 2 ** reconnectAttempts++, 12000));
   };
-  socket.onerror = () => { $("connection").textContent = "Connection interrupted"; };
+  socket.onerror = () => { $("connection").textContent = "Connection interrupted"; updateActivity(); };
 }
 
 function showSetup(s, joining = false) {
@@ -111,7 +151,20 @@ function nav(thread) {
   if (thread.kind === "personal") b.append(make("small", thread.owner === snapshot.me.id ? "Your role and coaching" : "Private by convention"));
   return b;
 }
+function updateActivity() {
+  const status = $("activity-status"); if (!status || !snapshot) return;
+  const activities = (snapshot.activities || []).filter(a => a.expiresAt > Date.now());
+  const labels = activities.map(a => `${a.label} (${Math.floor((Date.now() - a.startedAt) / 1000)}s)`);
+  const pending = [...pendingCommands.values()];
+  if (pending.length) labels.unshift(pending.some(p => p.operation === "message") ? "Saving your message…" : "Saving your request…");
+  if (socket?.readyState !== WebSocket.OPEN) labels.unshift("Connection interrupted — reconnecting. Your draft is kept.");
+  const idle = snapshot.phase === "active" ? "Ready. AI colleagues reply when @mentioned; Ask coach requests guidance." : snapshot.phase === "paused" ? "Round paused. The exercise clock is stopped." : snapshot.phase === "debrief" ? "Round finished. Discuss the debrief or replay." : "Waiting for the facilitator to start the round.";
+  status.textContent = labels.join(" · ") || idle;
+  status.classList.toggle("busy", Boolean(labels.length));
+  $("ask-coach").disabled = snapshot.phase === "lobby" || activities.some(a => a.participant === snapshot.me.id);
+}
 function updateTimer() {
+  updateActivity();
   if (!snapshot) return;
   const remaining = snapshot.phase === "active" ? Math.max(0, snapshot.endsAt - Date.now()) : Math.max(0, snapshot.durationMs - snapshot.elapsedMs);
   const seconds = Math.ceil(remaining / 1000);
@@ -146,7 +199,8 @@ function render() {
   if (lastRender !== fingerprint) {
     const feed = $("messages"), atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 100;
     const visible = s.messages.filter(m => m.thread === selectedThread);
-    const nodes = visible.map(m => {
+    const appendOnly = lastRender.startsWith(selectedThread + ":") && [...feed.children].every((node, i) => node.id === `message-${visible[i]?.id}`);
+    const nodes = (appendOnly ? visible.slice(feed.children.length) : visible).map(m => {
       const row = make("article", undefined, `message ${m.kind}`); row.id = `message-${m.id}`;
       const content = make("div", undefined, "message-main"), meta = make("div", undefined, "message-meta"), time = make("time", new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       time.dateTime = new Date(m.at).toISOString(); meta.append(make("strong", m.author), time, make("span", `#${m.id}`, "muted"));
@@ -154,7 +208,8 @@ function render() {
       if (m.refs?.length) content.append(make("div", `Evidence: ${m.refs.map(id => `#${id}`).join(", ")}`, "refs"));
       row.append(make("span", m.author.slice(0, 1).toUpperCase(), "avatar"), content); return row;
     });
-    feed.replaceChildren(...nodes); if (atBottom || !lastRender.startsWith(selectedThread + ":")) feed.scrollTop = feed.scrollHeight;
+    if (appendOnly) feed.append(...nodes); else feed.replaceChildren(...nodes);
+    if (atBottom || !lastRender.startsWith(selectedThread + ":")) feed.scrollTop = feed.scrollHeight;
     lastRender = fingerprint;
   }
   const lobby = $("lobby-banner"); lobby.hidden = s.phase !== "lobby";
@@ -166,7 +221,7 @@ function render() {
   if (!ending.hidden) { ending.replaceChildren(make("strong", s.ended.label), make("p", "Play has stopped. Discuss the debrief in Coordination, then try a fresh round."), button("Read debrief", () => chooseThread("coordination"), "secondary")); }
   $("role-cards").replaceChildren(...s.roleCards.map(r => { const card = make("div", undefined, "role-card"); card.append(make("h3", r.name), make("p", r.responsibility), make("p", `Authority: ${r.authority}`)); return card; }));
   $("coach-mode").textContent = s.coachMode === "model" ? "AI coaching · internal OpenAI-compatible endpoint" : "Authored coaching · no model endpoint configured";
-  $("ask-coach").disabled = s.phase === "lobby";
+  updateActivity();
   $("actions").replaceChildren(...s.actions.filter(a => a.allowed).map(a => {
     const b = button(a.label, () => confirmDialog(a.label, "This commits a fictional action under your role. Review any approvals with teammates first. The result will be recorded in this thread or Coordination.", () => command("action", { actionId: a.id, confirmed: true, thread: selectedThread })), a.done ? "done" : "");
     b.disabled = s.phase !== "active" || !a.ready || a.done;
@@ -233,6 +288,7 @@ async function replay() {
   confirmDialog("Start a fresh rehearsal?", "A new room starts with empty history, reset knowledge, and a fresh clock. Invite the team again and choose different responsibilities if you want to rotate roles.", async () => {
     const scenarioId = snapshot.scenario.id, name = snapshot.me.name;
     if (socket) { socket.onclose = null; socket.close(); }
+    clearTimeout(reconnectTimer);
     session = null; room = null; snapshot = undefined; selectedThread = "coordination"; lastRender = "";
     history.replaceState(null, "", "/"); $("workspace").hidden = true; $("welcome").hidden = false;
     $("round-heading").textContent = "Practice working together."; $("top-controls").replaceChildren();
