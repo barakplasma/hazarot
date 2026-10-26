@@ -47,6 +47,7 @@ jobs:
             qa/*.png
             qa/browser-runtime.log
             .build/test-runtime.log
+            .build/runtime-smoke.log
   image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: check
@@ -57,6 +58,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -67,12 +69,14 @@ jobs:
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/barakplasma/hazarot
       - name: Smoke test the published celld-based image
         env:
           IMAGE: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
         run: |
+          docker buildx imagetools inspect "$IMAGE" --raw | jq -e '.manifests | any(.platform.os == "linux" and .platform.architecture == "arm64")'
           docker run -d --name hazarot-smoke -p 127.0.0.1:19090:9876 \
             -e MODEL_BASE_URL=http://127.0.0.1:9/v1 -e MODEL_NAME=smoke-model "$IMAGE"
           for attempt in $(seq 1 40); do

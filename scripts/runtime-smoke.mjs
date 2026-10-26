@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { resolve } from "node:path";
 import { createWriteStream, existsSync, writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
 const app = resolve(".build/runtime"), port = 9989;
-const binary = process.env.CELLD_BIN || (existsSync(".tools/bin/celld") ? resolve(".tools/bin/celld") : "celld");
+const binary = process.env.CELLD_BIN || (existsSync(".tools/bin/celld") ? resolve(".tools/bin/celld") : execFileSync("/bin/sh", ["-c", "command -v celld"], { encoding: "utf8" }).trim());
 const log = createWriteStream(".build/runtime-smoke.log");
 const child = spawn("/bin/sh", ["scripts/start-runtime.sh"], {
   detached: true, stdio: ["ignore", "pipe", "pipe"],
