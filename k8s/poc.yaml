@@ -1,0 +1,92 @@
+# Single-node proof of concept using celld dev's persistent local store.
+# Not a production fleet or high-availability configuration.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rehearsal-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rehearsal
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rehearsal
+  template:
+    metadata:
+      labels:
+        app: rehearsal
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: rehearsal
+          image: rehearsal-poc:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9876
+          env:
+            - name: HOST
+              value: 0.0.0.0
+            - name: ROOM_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rehearsal-access
+                  key: ROOM_ACCESS_KEY
+          envFrom:
+            - secretRef:
+                name: rehearsal-model
+                optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /app/.celld
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9876
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9876
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rehearsal-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rehearsal
+spec:
+  selector:
+    app: rehearsal
+  ports:
+    - port: 9876
+      targetPort: 9876
+  type: ClusterIP

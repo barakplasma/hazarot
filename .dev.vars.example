@@ -1,0 +1,7 @@
+# Optional: without these, deterministic authored coaching is available.
+# Supply an OpenAI-compatible CHAT COMPLETIONS endpoint, not Workers AI.
+# MODEL_BASE_URL=http://inference.internal:8000/v1
+# MODEL_NAME=your-model-name
+# MODEL_API_KEY=optional-api-key
+# Optional shared key required to create rooms; participants use invitation links.
+# ROOM_ACCESS_KEY=choose-a-long-random-value

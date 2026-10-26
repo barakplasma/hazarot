@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rehearsal — practice working together</title>
+  <link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/">Rehearsal<span class="brand-dot"></span></a><div id="round-heading" class="round-heading">Practice working together.</div><div id="top-controls" class="top-controls"></div></header>
+  <div id="notice" role="status" class="notice" hidden></div>
+  <main id="welcome" class="welcome">
+    <div class="welcome-intro"><h1>Rare situations.<br>Better conversations.</h1><p>A short, fictional rehearsal for the way your team shares information, makes decisions, and hands over responsibility.</p><p class="muted">10–12 minutes of practice · 5-minute debrief · 1–10 participants</p></div>
+    <section aria-labelledby="choose-title"><h2 id="choose-title">Choose a rehearsal</h2><div id="scenarios" class="scenario-grid"></div></section>
+    <form id="setup-form" class="setup-form" hidden>
+      <h2 id="setup-title">Set up your room</h2><p id="setup-description" class="muted"></p>
+      <label>Your name<input id="participant-name" required maxlength="40" autocomplete="given-name" placeholder="e.g. Amira"></label>
+      <fieldset><legend>Your responsibilities <span class="muted">— choose one or more</span></legend><div id="role-choices" class="role-choices"></div></fieldset>
+      <label id="room-key-label" hidden>Room access key<input id="room-key" type="password" autocomplete="off"></label>
+      <p class="small muted">Individual threads are private by convention. Everyone in the room can open them. All events and actions are fictional.</p>
+      <button id="create-room" type="submit" class="primary">Create rehearsal room</button>
+    </form>
+    <p id="backend-mode" class="small muted"></p>
+  </main>
+  <main id="workspace" class="workspace" hidden>
+    <nav class="sidebar" aria-label="Room threads">
+      <div class="nav-heading">ROOM</div><div id="room-nav"></div>
+      <div class="nav-heading">PARTICIPANT THREADS <span title="Visible to everyone; private by convention">ⓘ</span></div><div id="personal-nav"></div>
+      <div class="nav-heading split">WORK THREADS<button id="new-thread" class="icon-button" title="Create a thread" aria-label="Create a thread">+</button></div><div id="work-nav"></div>
+      <div class="participants"><div class="nav-heading">PARTICIPANTS</div><div id="participants"></div></div>
+      <div class="sidebar-bottom"><span id="connection" class="connection">Connecting…</span><button id="invite" class="quiet" hidden>Invite participants</button><button id="export" class="quiet">Export transcript</button></div>
+    </nav>
+    <section class="conversation" aria-label="Conversation">
+      <div class="conversation-heading"><div><h1 id="thread-title">Coordination</h1><p id="thread-subtitle" class="muted">Share decisions, owners, and next updates.</p></div><button id="role-toggle" class="quiet mobile-only" aria-expanded="false">Role & actions</button></div>
+      <div id="lobby-banner" class="lobby-banner" hidden></div>
+      <div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div>
+      <div id="ending-banner" class="ending-banner" hidden></div>
+      <form id="composer" class="composer"><label class="sr-only" for="message">Message this thread</label><textarea id="message" rows="2" maxlength="4000" placeholder="Message Coordination…" required></textarea><button type="submit" class="primary">Send</button></form>
+      <p class="composer-note">Chat records discussion. Action cards commit fictional outcomes.</p>
+    </section>
+    <aside id="role-panel" class="role-panel" aria-label="Your role and simulated actions">
+      <button id="role-close" class="quiet mobile-only" type="button">Close role panel</button><h2>Your role</h2><div id="role-cards"></div>
+      <div class="panel-section"><h2>Round guide</h2><ol class="round-guide"><li><strong>Establish ownership</strong><span>Agree who coordinates and who decides.</span></li><li><strong>Share evidence</strong><span>Separate what you know from what you assume.</span></li><li><strong>Confirm decisions</strong><span>State the action, owner, and next update.</span></li></ol></div>
+      <button id="ask-coach" class="primary full">Ask coach</button><button id="template" class="secondary full">Use status template</button><p id="coach-mode" class="small muted"></p>
+      <div class="panel-section"><h2>Simulated actions</h2><p class="small muted">Choose a card to review and confirm. Prerequisites and role authority apply.</p><div id="actions" class="action-list"></div></div>
+      <div class="panel-section"><h2>End the round</h2><div id="endings" class="action-list"></div></div>
+    </aside>
+  </main>
+  <dialog id="modal"><form id="modal-form"><h2 id="modal-title"></h2><p id="modal-description"></p><label id="modal-input-label" hidden>Details<input id="modal-input" maxlength="1500"></label><label id="modal-kind-label" hidden>Thread type<select id="modal-kind"><option value="investigation">Investigation</option><option value="meeting">Meeting</option></select></label><div class="dialog-buttons"><button id="modal-cancel" type="button" class="secondary">Cancel</button><button id="modal-confirm" type="submit" class="primary">Confirm</button></div></form></dialog>
+</body></html>

@@ -1,0 +1,11 @@
+node_modules/
+.celld/
+.build/
+.tools/
+.dev.vars
+.env*
+test-results/
+playwright-report/
+qa/
+test-results.json
+browser-results.json

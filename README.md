@@ -1,5 +1,183 @@
 # Hazarot
 
-Short team coordination rehearsals on celld and Cloudflare Agents.
+Short team coordination rehearsals. Practice rare or sensitive situations before
+the real event: responsibilities, shared information, decisions, approvals,
+stakeholder updates, and handoffs. This is a phase-zero proof of concept.
 
-Phase-zero implementation and setup instructions are being added in the next commit.
+## What works
+
+- A static HTML/CSS/JavaScript chat interface with real WebSocket updates.
+- One Cloudflare Agent per room, running on self-hosted celld.
+- 1–10 participants; each can hold multiple responsibilities for small groups.
+- A shared coordination feed, individual role/coaching threads, and work threads.
+- Two Markdown scenarios: **CI credentials exposed** and **The bus isn't coming**.
+- Confirmed fictional actions, role authority, and explicit approval prerequisites.
+- Timed developments, pause/resume, time limits, and scenario-defined endings.
+- Declaration endings can be premature; verified world endings need recorded facts.
+- An evidence-linked authored debrief, reflection chat, transcript export, and replay.
+- Authored coaching without inference; optional AI coaching via any compatible
+  OpenAI chat-completions server using the Vercel AI SDK.
+
+No Ax, Effect, Workers AI, Cloudflare account, or external platform is required
+at runtime. No commands affect real infrastructure, bookings, or people.
+
+## Run locally
+
+Use Node.js 24+ and celld **0.6.3** from
+<https://github.com/denoland/celld/releases/tag/v0.6.3>.
+Put `celld` on PATH, or set `CELLD_BIN` to its executable path.
+
+```sh
+npm ci
+npm run dev
+```
+
+Open <http://127.0.0.1:9876>. Select a scenario, enter your name, choose one or more
+roles, and create a room. Use **Invite participants** before starting. Each teammate
+opens the link and joins with their own name and roles. The facilitator starts
+the round. For a solo walkthrough, select every role yourself.
+
+Use work threads for investigations or meetings. Use **Ask coach** for guidance;
+replies appear in your individual thread. **Use status template** inserts an
+editable template into the composer. Discussion does not implicitly change the
+fictional world: use a role-authorized action card and confirm it. The incident
+commander can declare all clear; in the offsite scenario, a boarding action must
+establish the actual fictional outcome. Endings start the debrief immediately.
+
+Replay returns you to setup and creates a new room when you submit. Invite the
+team again, optionally rotate roles, and try another strategy. Prior messages,
+evidence, model callbacks, and commitments are not copied into that new run.
+
+The round clock is server-owned. The debrief has a suggested five-minute duration;
+it does not forcibly close reflection chat. Joining closes once a round starts.
+
+## Inference
+
+Copy `.dev.vars.example` to `.dev.vars` and set:
+
+```dotenv
+MODEL_BASE_URL=http://inference.internal:8000/v1
+MODEL_NAME=your-model-name
+# Optional if your inference server requires it:
+MODEL_API_KEY=your-key
+# Recommended for a shared deployment:
+ROOM_ACCESS_KEY=your-long-random-room-creation-key
+```
+
+Restart the app after changing configuration. `MODEL_BASE_URL` must include the
+API prefix (usually `/v1`); the provider calls `/chat/completions`. This supports
+an internal vLLM or similar service. No Cloudflare model binding is used. The
+endpoint is operator configuration and cannot be supplied by a scenario or browser.
+
+Only the caller's role knowledge, their personal thread, and shared work/room
+messages are sent to coaching inference. Hidden ground truth and other personal
+threads are excluded. AI output cannot commit actions, change facts, or end play.
+Calls have a 12-second timeout and no automatic transport retries. Failure falls
+back to explicitly labeled authored coaching. Model quality is not guaranteed by
+the protocol tests; use human pilots before relying on coaching judgments.
+
+**No live model was used for the recorded phase-zero test run.** The integration
+suite exercises the actual AI SDK against a local OpenAI-compatible protocol
+fixture, including error fallback and an ending during an in-flight request.
+
+## Tests
+
+```sh
+npm run build
+npm run typecheck
+npm test
+npx playwright install chromium
+npm run test:browser
+```
+
+The backend suite runs real celld and real Agents with headless HTTP/WebSocket
+clients. It covers scenario validation, scoped data, invitations, authority,
+approvals, duplicate/concurrent commands, both domains, scheduled developments,
+timeouts, pause/restart/resume, endings, replay, model integration, and ten users.
+The timer fixture exists only in the test project's generated catalog; there is
+no public test-clock override endpoint.
+
+The browser suite exercises two independent browser sessions, messages, work
+threads, actions, coaching, templates, pause/resume, reload, mobile layout,
+debrief, and replay. It saves screenshots and reports to ignored local paths.
+Set `CHROMIUM_PATH` to use an existing Chromium installation if needed.
+
+See [docs/validation.md](docs/validation.md) for what was actually verified.
+The GitHub workflow runs backend and browser checks without external inference.
+
+## Write a scenario
+
+Add a `.md` file under `scenarios/`, following either included example, then run
+`npm run build`. No application changes are needed to switch domains.
+
+YAML front matter contains metadata, roles, a small action catalog, endings,
+timed developments, and observation criteria. Markdown supplies the required
+`# Briefing`, `# Ground truth`, `# Status template`, and `# Debrief` sections.
+The build validates identifiers, role references, and action prerequisites.
+
+The action model is intentionally small: an action has permitted roles,
+prerequisite fact flags, fact flags it establishes, and authored result text.
+It may trigger a verified ending. There are no expressions, scripts, integrations,
+or model-created rules. Freeform requests outside that catalog need facilitator
+judgment; arbitrary prose is not automatically compiled into executable behavior.
+
+Information belongs in the relevant role card or action result. `scope: room`
+posts a result in Coordination; otherwise the result is posted in the selected
+thread. Change the scenario version when changing facts or rules. Active runs
+require their pinned scenario version to remain available after an upgrade.
+
+## Architecture
+
+`src/index.ts` contains the Agent and request routing. `src/scenario.ts` parses
+and validates Markdown. `src/coach.ts` makes scoped AI SDK calls. The client is
+three static files under `public/`. `scripts/build.mjs` generates the server-only
+catalog. The Agent stores its canonical run and transcript in SQLite; its SDK
+state contains only a public protocol version. WebSockets notify clients to
+refresh their authenticated snapshot. Client commands carry idempotency IDs.
+
+The first committed ending wins. Future developments and fictional actions no
+longer apply, while debrief discussion remains open. A debrief distinguishes
+recorded action receipts from qualitative interpretations of the conversation.
+
+This deliberately avoids a generic workflow engine, separate application
+database, autonomous NPC framework, or transport plugin SDK. Rocket.Chat is a
+possible later adapter, not a dependency of phase zero.
+
+## Kubernetes proof of concept
+
+The Dockerfile and `k8s/poc.yaml` provide a **single-replica celld dev-mode**
+deployment with persistent local storage. This is not a production fleet or an
+HA design. It requires normal `/proc` support and a writable persistent volume.
+
+```sh
+docker build -t rehearsal-poc:0.1.0 .
+# Load/push that image into your cluster's registry and adjust the manifest image.
+kubectl create secret generic rehearsal-access \
+  --from-literal=ROOM_ACCESS_KEY='replace-with-a-long-random-value'
+kubectl apply -f k8s/poc.yaml
+kubectl port-forward service/rehearsal 9876:9876
+```
+
+For inference, optionally create a `rehearsal-model` Secret containing
+`MODEL_BASE_URL`, `MODEL_NAME`, and, if needed, `MODEL_API_KEY`. The deployment
+loads it through `envFrom`. A ConfigMap alone is insufficient for API keys.
+Container and Kubernetes manifests are supplied but were not deployed in this
+environment. For multiple nodes or production, configure celld's supported
+bucket-backed fleet and validate recovery separately; do not scale this manifest.
+
+## Boundaries and limitations
+
+- Personal threads are **private by convention**. Every joined human can read
+  them. AI context filtering is separate and enforced server-side.
+- Invitation links and participant tokens are bearer capabilities. Tokens persist
+  in that browser's local storage. Use trusted pilot groups; this is not SSO.
+- Without `ROOM_ACCESS_KEY`, anyone able to reach the app can create a room.
+  Use the shared key and internal ingress/TLS for a pilot outside localhost.
+- Scenarios are trusted, operator-authored files. Client-rendered content uses
+  text nodes, never raw scenario HTML. Do not publish the server catalog as assets.
+- Authored observations are not employee scores. Facilitators should challenge
+  interpretations and inspect the referenced messages.
+- AI coworkers, GEPA, automatic freeform action execution, arbitrary scenario
+  imports, thread ACLs, and measured human learning outcomes are outside phase zero.
+- There is no built-in retention/deletion UI. The local `.celld/` directory holds
+  rehearsal data and should be treated accordingly.

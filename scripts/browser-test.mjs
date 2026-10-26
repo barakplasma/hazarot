@@ -1,0 +1,77 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { chromium } from "@playwright/test";
+import { mkdirSync, createWriteStream, existsSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+mkdirSync("qa",{recursive:true});
+const binary=process.env.CELLD_BIN||(existsSync(".tools/bin/celld")?resolve(".tools/bin/celld"):"celld");
+const child=spawn(binary,["dev",".","--host","127.0.0.1","--port","9988","--no-watch","--logs"],{detached:true,env:{...process.env,PATH:`${process.cwd()}/node_modules/.bin:${process.env.PATH}`},stdio:["ignore","pipe","pipe"]});
+const log=createWriteStream("qa/browser-runtime.log"); child.stdout.pipe(log,{end:false});child.stderr.pipe(log,{end:false});
+const base="http://127.0.0.1:9988",sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let browser;const checks=[],errors=[];
+async function until(fn){const end=Date.now()+15000;while(Date.now()<end){try{const value=await fn();if(value)return value;}catch{}await sleep(100);}throw new Error("Timed out waiting for server");}
+const pass=label=>{checks.push(label);console.log(`PASS ${label}`);};
+try{
+  await until(()=>fetch(base+"/health").then(r=>r.ok));
+  browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH||chromium.executablePath(),args:["--no-sandbox"]});
+  const host=await browser.newContext({viewport:{width:1440,height:1000}}),guest=await browser.newContext({viewport:{width:1200,height:900}});
+  const page=await host.newPage(),peer=await guest.newPage();
+  for(const p of [page,peer]){p.on("pageerror",e=>errors.push(e.message));p.on("console",m=>{if(m.type()==="error")errors.push(m.text());});}
+  await page.goto(base);await page.getByRole("heading",{name:"Rare situations."}).waitFor();
+  await page.screenshot({path:"qa/welcome.png",fullPage:true});
+  await page.getByRole("button",{name:/Incident response.*CI credentials exposed/}).click();
+  await page.getByLabel("Your name").fill("Amira");await page.getByRole("button",{name:"Create rehearsal room"}).click();
+  await page.getByRole("button",{name:"Start round",exact:true}).waitFor();
+  await page.getByRole("button",{name:"Invite participants"}).click();
+  const invite=await page.locator("#modal-input").inputValue();
+  await page.getByRole("button",{name:"Done",exact:true}).click();
+  await peer.goto(invite);await peer.getByLabel("Your name").fill("Sam");
+  await peer.locator('input[value="commander"]').uncheck();await peer.locator('input[value="security"]').check();
+  await peer.getByRole("button",{name:"Join rehearsal room"}).click();
+  await peer.getByRole("heading",{name:"Coordination",exact:true}).waitFor();
+  await page.getByRole("button",{name:"Start round",exact:true}).click();
+  await page.getByRole("button",{name:"Pause",exact:true}).waitFor();
+  pass("Two browser sessions create/join a room and begin a shared round");
+  await page.locator("#message").fill("I will coordinate. Sam, please check the token scope and report uncertainty.");
+  await page.getByRole("button",{name:"Send",exact:true}).click();
+  await peer.getByText("I will coordinate. Sam, please check the token scope and report uncertainty.",{exact:true}).waitFor();
+  await peer.locator("#message").fill("Acknowledged. I will report findings in two minutes.");await peer.getByRole("button",{name:"Send",exact:true}).click();
+  await page.getByText("Acknowledged. I will report findings in two minutes.",{exact:true}).waitFor();
+  pass("Live messages arrive in both participant browsers");
+  await page.getByRole("button",{name:"Create a thread",exact:true}).click();await page.locator("#modal-input").fill("Token investigation");await page.getByRole("button",{name:"Confirm",exact:true}).click();
+  await page.getByRole("heading",{name:"Token investigation",exact:true}).waitFor();
+  await peer.getByRole("button",{name:"Token investigation",exact:true}).click();
+  await peer.getByRole("button",{name:"Inspect token audit records",exact:true}).click();await peer.getByRole("button",{name:"Confirm",exact:true}).click();
+  await page.getByText(/Audit evidence shows the publishing token/).waitFor();
+  pass("Work threads and confirmed role-authorized action receipts synchronize");
+  await page.getByRole("button",{name:/Amira · role & coaching/}).click();
+  await page.getByRole("button",{name:"Ask coach",exact:true}).click();await page.locator("#modal-input").fill("How do I ask for an update without taking over?");await page.getByRole("button",{name:"Confirm",exact:true}).click();
+  await page.getByText("Authored coach",{exact:true}).waitFor();
+  await page.getByRole("button",{name:"Use status template",exact:true}).click();assert((await page.locator("#message").inputValue()).includes("Next update:"));await page.locator("#message").fill("");
+  await page.getByRole("button",{name:"Pause",exact:true}).click();await page.getByRole("button",{name:"Resume",exact:true}).waitFor();await page.getByRole("button",{name:"Resume",exact:true}).click();
+  await page.reload();await page.getByRole("button",{name:"Pause",exact:true}).waitFor();
+  pass("Authored coaching, templates, pause/resume and saved-session reload work");
+  await page.getByRole("button",{name:"Coordination",exact:true}).click();
+  await page.screenshot({path:"qa/active-desktop.png",fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole("button",{name:"Role & actions",exact:true}).click();await page.getByRole("heading",{name:"Your role",exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.screenshot({path:"qa/active-mobile.png",fullPage:true});
+  await page.getByRole("button",{name:"Close role panel",exact:true}).click();await page.setViewportSize({width:1440,height:1000});
+  pass("Mobile role panel is usable without horizontal page overflow");
+  await page.getByRole("button",{name:"Declare all clear",exact:true}).click();await page.getByRole("button",{name:"Confirm",exact:true}).click();
+  await page.getByText("Debrief",{exact:true}).last().waitFor();
+  await page.getByText(/Not recorded through an action: Recovery verified/).waitFor();
+  await page.screenshot({path:"qa/debrief.png",fullPage:true});
+  await page.getByRole("button",{name:"Replay",exact:true}).click();await page.getByRole("button",{name:"Confirm",exact:true}).click();
+  await page.getByRole("button",{name:"Create rehearsal room",exact:true}).waitFor();
+  assert.equal(await page.getByLabel("Your name").inputValue(),"Amira");
+  await page.getByRole("button",{name:"Create rehearsal room",exact:true}).click();await page.getByRole("button",{name:"Start round",exact:true}).waitFor();
+  assert.equal(await page.getByText("Acknowledged. I will report findings in two minutes.",{exact:true}).count(),0);
+  pass("Premature declaration produces an honest debrief; replay creates a clean room");
+  assert.deepEqual(errors,[]);
+  writeFileSync("browser-results.json",JSON.stringify({passed:true,checks,consoleErrors:errors,at:new Date().toISOString()},null,2)+"\n");
+}catch(error){console.error(error);writeFileSync("browser-results.json",JSON.stringify({passed:false,checks,consoleErrors:errors,error:error.stack},null,2)+"\n");process.exitCode=1;}
+finally{if(browser)await browser.close();if(child.exitCode===null){const done=once(child,"exit");process.kill(-child.pid,"SIGTERM");const t=setTimeout(()=>{try{process.kill(-child.pid,"SIGKILL");}catch{}},3000);await done;clearTimeout(t);}log.end();}
