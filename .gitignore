@@ -9,3 +9,4 @@ playwright-report/
 qa/
 test-results.json
 browser-results.json
+runtime-results.json

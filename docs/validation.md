@@ -10,6 +10,10 @@
 - Participant data and transcript survived a graceful process restart.
 - Both domain-specific endings, premature all-clear, cancellation, and timeout
   were exercised; post-ending world changes were rejected.
+- A prebundled `no_bundle` runtime starts with no Node/npm/esbuild on PATH;
+  static assets, inference environment bindings, and authenticated room creation work.
+- GitHub CI completed all browser workflows. The initial run caught a missing
+  favicon; the icon correction passed the overall browser check on a later run.
 
 ## Browser validation blocked
 

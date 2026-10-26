@@ -8,7 +8,9 @@
     "dev": "node scripts/dev.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
-    "test:browser": "node scripts/browser-test.mjs"
+    "test:browser": "node scripts/browser-test.mjs",
+    "build:runtime": "node scripts/build-runtime.mjs",
+    "test:runtime": "node scripts/runtime-smoke.mjs"
   },
   "keywords": [],
   "author": "",

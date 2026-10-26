@@ -1,19 +1,16 @@
-FROM node:24-bookworm-slim
-ARG CELLD_VERSION=v0.6.3
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gzip \
-    && rm -rf /var/lib/apt/lists/* \
-    && case "$(dpkg --print-architecture)" in amd64) target=x86_64-unknown-linux-gnu ;; arm64) target=aarch64-unknown-linux-gnu ;; *) exit 1 ;; esac \
-    && curl -fsSL "https://github.com/denoland/celld/releases/download/${CELLD_VERSION}/celld-${target}.gz" -o /tmp/celld.gz \
-    && gzip -dc /tmp/celld.gz > /usr/local/bin/celld \
-    && chmod 755 /usr/local/bin/celld && rm /tmp/celld.gz
-WORKDIR /app
+FROM node:24-bookworm-slim AS build
+WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build && npm run typecheck \
-    && useradd --uid 10001 --create-home rehearsal \
-    && mkdir -p /app/.celld && chown -R 10001:10001 /app
+RUN npm run build:runtime && npm run typecheck
+
+FROM ghcr.io/denoland/celld:0.6.3
+WORKDIR /app
+COPY --from=build --chown=10001:10001 /build/.build/runtime/ /app/
+COPY --chown=10001:10001 scripts/start-runtime.sh /app/start-runtime.sh
+RUN mkdir -p /app/.celld && chmod 755 /app/start-runtime.sh && chown -R 10001:10001 /app
 USER 10001:10001
-ENV HOST=0.0.0.0 PORT=9876
+ENV HOME=/app HOST=0.0.0.0 PORT=9876
 EXPOSE 9876
-CMD ["npm", "run", "dev"]
+ENTRYPOINT ["/app/start-runtime.sh"]

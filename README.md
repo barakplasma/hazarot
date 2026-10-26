@@ -84,6 +84,8 @@ fixture, including error fallback and an ending during an in-flight request.
 npm run build
 npm run typecheck
 npm test
+npm run build:runtime
+npm run test:runtime
 npx playwright install chromium
 npm run test:browser
 ```
@@ -146,6 +148,12 @@ possible later adapter, not a dependency of phase zero.
 The Dockerfile and `k8s/poc.yaml` provide a **single-replica celld dev-mode**
 deployment with persistent local storage. This is not a production fleet or an
 HA design. It requires normal `/proc` support and a writable persistent volume.
+
+The final OCI stage is `ghcr.io/denoland/celld:0.6.3`. Node is only a build stage.
+The image contains a prebundled Worker and static files, uses `no_bundle: true`,
+and runs without Node, npm, or esbuild at startup. The small entrypoint translates
+the three inference environment variables into private celld Worker bindings.
+The runtime smoke test verifies that mapping with an intentionally missing esbuild.
 
 ```sh
 docker build -t rehearsal-poc:0.1.0 .

@@ -25,6 +25,8 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - run: npm test
+      - run: npm run build:runtime
+      - run: npm run test:runtime
       - name: Select browser
         run: |
           chrome="$(command -v google-chrome || command -v chromium || true)"
@@ -41,6 +43,7 @@ jobs:
           path: |
             test-results.json
             browser-results.json
+            runtime-results.json
             qa/*.png
             qa/browser-runtime.log
             .build/test-runtime.log
@@ -66,3 +69,21 @@ jobs:
           push: true
           tags: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/barakplasma/hazarot
+      - name: Smoke test the published celld-based image
+        env:
+          IMAGE: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
+        run: |
+          docker run -d --name hazarot-smoke -p 127.0.0.1:19090:9876 \
+            -e MODEL_BASE_URL=http://127.0.0.1:9/v1 -e MODEL_NAME=smoke-model "$IMAGE"
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19090/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:19090/health
+          curl -fsS http://127.0.0.1:19090/api/scenarios | jq -e '.coachMode == "model" and (.scenarios | length == 2)'
+          docker exec hazarot-smoke sh -c '! command -v node && ! command -v npm && ! command -v esbuild'
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs hazarot-smoke 2>/dev/null || true
+          docker rm -f hazarot-smoke 2>/dev/null || true
