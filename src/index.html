@@ -14,6 +14,7 @@
     <form id="setup-form" class="setup-form" hidden>
       <h2 id="setup-title">Set up your room</h2><p id="setup-description" class="muted"></p>
       <label>Your name<input id="participant-name" required maxlength="40" autocomplete="given-name" placeholder="e.g. Amira"></label>
+      <label id="creator-certificate-label">Room creator certificate<input id="creator-certificate" type="file" accept=".json,application/json"><small>The private key stays in your browser. Participants joining a room need only its secret link.</small></label>
       <fieldset><legend>Your responsibilities <span class="muted">— choose one or more</span></legend><div id="role-choices" class="role-choices"></div></fieldset>
       <p class="small muted">Individual threads are private by convention. Everyone in the room can open them. All events and actions are fictional.</p>
       <button id="create-room" type="submit" class="primary">Create rehearsal room</button>

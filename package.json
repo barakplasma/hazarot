@@ -11,7 +11,8 @@
     "test:browser": "node scripts/browser-test.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
     "test:runtime": "node scripts/runtime-smoke.mjs",
-    "test:analytics": "node scripts/analytics-test.mjs"
+    "test:analytics": "node scripts/analytics-test.mjs",
+    "test:budget": "node scripts/budget-test.mjs"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +24,7 @@
     "ai": "6.0.0",
     "posthog-js": "1.438.23",
     "posthog-node": "5.57.2",
+    "ulid": "3.0.2",
     "yaml": "2.9.0"
   },
   "devDependencies": {

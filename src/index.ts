@@ -4,12 +4,15 @@ import { catalog } from "./catalog.generated";
 import { overview } from "./scenario";
 import { coach, modelEnabled, type ModelConfig } from "./coach";
 import { Character } from "./character";
-export { Character };
+import { Authority, authorityAgent, creatorConfigured, type AuthorityEnv } from "./authority";
+// @ts-expect-error Shared browser/Worker protocol.
+import { creationIntent, digest } from "./creator-protocol.js";
+export { Character, Authority };
 import type { Run, Participant, Scenario, Message } from "./types";
 
 import { captureServer, type AnalyticsConfig } from "./analytics/server";
 
-type Env = ModelConfig & AnalyticsConfig & { Character: DurableObjectNamespace<Character>; Rehearsal: DurableObjectNamespace<Rehearsal>; ASSETS: Fetcher };
+type Env = ModelConfig & AnalyticsConfig & AuthorityEnv & { Character: DurableObjectNamespace<Character>; Rehearsal: DurableObjectNamespace<Rehearsal>; ASSETS: Fetcher };
 class RequestError extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 function requireThat(condition: unknown, message: string, status = 400): asserts condition { if (!condition) throw new RequestError(message, status); }
 const token = () => crypto.randomUUID() + crypto.randomUUID();
@@ -20,6 +23,7 @@ const textField = (value: unknown, max: number, label: string) => {
 const response = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 const hasRoles = (p: Participant, roles: string[]) => roles.some(r => p.roles.includes(r));
 const satisfies = (r: Run, flags: string[] = []) => flags.every(f => Boolean(r.flags[f]));
+const secretRoom = (id: string) => /^[0-9A-HJKMNP-TV-Z]{16}$/.test(id);
 
 export class Rehearsal extends Agent<Env, { protocol: number }> {
   initialState = { protocol: 1 };
@@ -121,10 +125,13 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
     const s = this.scenario(run), own = `personal-${p.id}`, phase = run.phase, startedAt = run.startedAt, start = Date.now();
     let output = s.roles.filter(r => p.roles.includes(r.id)).map(r => `${r.name}: ${r.hint}`).join("\n\n");
     output += "\n\nTry: ‘Here is what I know, here is what I do not know, and here is what I need from you.’ Ask for acknowledgment and an owner.";
-    let source = "Authored coach";
+    let source = "Authored coach", reserved = false;
+    const lease = `${run.room}:coach:${activityId}`;
     try {
       if (modelEnabled(this.env)) {
-        try { output = await coach(this.env, s.roles.filter(r => p.roles.includes(r.id)), p, run.messages, question); source = "AI coach"; }
+        try { reserved = await (await authorityAgent(this.env)).reserveInference(lease, run.room); } catch { /* Fail closed to authored coaching. */ }
+        if (!reserved) source = "Authored coach · AI allowance reached";
+        else try { output = await coach(this.env, s.roles.filter(r => p.roles.includes(r.id)), p, run.messages, question); source = "AI coach"; }
         catch { source = "Authored coach · model unavailable"; }
       }
       const current = this.load();
@@ -133,7 +140,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
         this.post(current, own, source, output, "coach"); this.save(current);
         this.track(current, "coach_completed", { participant_name: p.name, participant_id: p.id, coach_source: source === "AI coach" ? "model" : source.includes("unavailable") ? "fallback" : "authored", duration_ms: Date.now() - start });
       }
-    } finally { this.clearActivity(activityId); }
+    } finally { if (reserved) { try { await (await authorityAgent(this.env)).releaseInference(lease); } catch {} } this.clearActivity(activityId); }
   }
   private characterBusy = new Set<string>();
   private async answerCharacter(run: Run, participant: Participant, characterId: string, thread: string, question: string, turnId: string) {
@@ -146,11 +153,13 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
     }
     this.characterBusy.add(characterId);
     this.beginActivity(this.load()!, turnId, `${character.name} - ai is preparing a reply`, thread);
-    const startedAt = run.startedAt, start = Date.now();
+    const startedAt = run.startedAt, start = Date.now(), lease = `${run.room}:character:${turnId}`;
+    let reserved = false;
     try {
+      if (modelEnabled(this.env)) { try { reserved = await (await authorityAgent(this.env)).reserveInference(lease, run.room); } catch {} }
       const agent = await getAgentByName(this.env.Character, `${run.room}:${character.id}`);
       const visible = run.messages.filter(m => m.thread === "coordination" || (m.thread === thread && !m.thread.startsWith("personal-"))).slice(-24).map(({ id, author, text }) => ({ id, author, text }));
-      const reply = await agent.reply({ profile: character, turnId, question, messages: visible });
+      const reply = await agent.reply({ profile: character, turnId, question, messages: visible, allowModel: reserved });
       const current = this.load();
       if (current?.phase !== "active" || current.startedAt !== startedAt) return;
       current.activities = (current.activities || []).filter(a => a.id !== turnId);
@@ -160,7 +169,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       const current = this.load();
       if (current?.phase === "active" && current.startedAt === startedAt) { this.post(current, thread, `${character.name} - ai`, "I couldn't prepare a reply. Please ask me again."); this.save(current); }
     }
-    finally { this.characterBusy.delete(characterId); this.clearActivity(turnId); }
+    finally { if (reserved) { try { await (await authorityAgent(this.env)).releaseInference(lease); } catch {} } this.characterBusy.delete(characterId); this.clearActivity(turnId); }
   }
   private elapsed(run: Run) { return run.elapsedMs + (run.phase === "active" && run.startedAt ? Date.now() - run.startedAt : 0); }
   private finish(run: Run, reason: string, label: string, assessment: string, trigger?: number) {
@@ -215,6 +224,18 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
     const result = await this.onRequest(new Request("https://room.internal/", { method: "POST", headers: { authorization: `Bearer ${participant.token}`, "content-type": "application/json" }, body: JSON.stringify({ ...frame.payload, ackOnly: true }) }));
     connection.send(JSON.stringify({ type: "command_result", commandId: frame.payload.commandId, status: result.status, data: await result.json() }));
   }
+  // Server-side RPC only: deliberately not @callable and unavailable to HTTP init.
+  initialize(body: { room: string; scenarioId: string; name: string; roles: string[] }) {
+    const existing = this.load();
+    if (existing) return { token: existing.participants.find(p => p.host)!.token, room: existing.room };
+    const s = catalog.find(s => s.id === body.scenarioId); requireThat(s, "Unknown scenario");
+    requireThat(secretRoom(body.room), "Invalid room secret");
+    const run: Run = { scenarioId: s.id, scenarioVersion: s.version, room: body.room, invite: "", phase: "lobby", participants: [], threads: [{ id: "coordination", title: "Coordination", kind: "coordination" }], messages: [], flags: {}, processed: {}, fired: [], revision: 0, seq: 0, durationMs: s.exercise_minutes * 60000, elapsedMs: 0 };
+    this.post(run, "coordination", "Game master", s.briefing);
+    const p = this.addParticipant(run, s, body.name, body.roles, true); this.save(run);
+    this.track(run, "room_created", { participant_name: p.name, participant_id: p.id });
+    return { token: p.token, room: run.room };
+  }
   async onRequest(request: Request): Promise<Response> {
     try {
       let run = this.load();
@@ -223,7 +244,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
         const supplied = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? null;
         if (!supplied) {
           const invite = new URL(request.url).searchParams.get("invite");
-          requireThat(invite === run.invite, "Use the invitation link", 401);
+          requireThat(secretRoom(run.room) || invite === run.invite, "Use the invitation link", 401);
           return response({ scenario: overview(this.scenario(run)), phase: run.phase, room: run.room, participants: run.participants.map(p => ({ name: p.name, roles: p.roles })) });
         }
         if (run.phase === "active" && this.elapsed(run) >= run.durationMs) { await this.wake(); run = this.load()!; }
@@ -232,20 +253,11 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       requireThat(request.method === "POST", "Method not allowed", 405);
       const raw = await request.text(); requireThat(raw.length <= 24000, "Request too large", 413);
       let body: any; try { body = JSON.parse(raw); } catch { throw new RequestError("Invalid JSON"); }
-      if (body.op === "init") {
-        requireThat(!run, "Room already exists", 409);
-        const s = catalog.find(s => s.id === body.scenarioId); requireThat(s, "Unknown scenario");
-        const room = textField(body.room, 64, "room ID");
-        run = { scenarioId: s.id, scenarioVersion: s.version, room, invite: token(), phase: "lobby", participants: [], threads: [{ id: "coordination", title: "Coordination", kind: "coordination" }], messages: [], flags: {}, processed: {}, fired: [], revision: 0, seq: 0, durationMs: s.exercise_minutes * 60000, elapsedMs: 0 };
-        this.post(run, "coordination", "Game master", s.briefing);
-        const p = this.addParticipant(run, s, body.name, body.roles, true); this.save(run);
-        this.track(run, "room_created", { participant_name: p.name, participant_id: p.id });
-        return response({ token: p.token, room, invite: run.invite });
-      }
+      requireThat(body.op !== "init", "A creator certificate is required to create rooms", 403);
       requireThat(run, "Room not found", 404);
       const s = this.scenario(run);
       if (body.op === "join") {
-        requireThat(body.invite === run.invite, "Invalid invitation", 403);
+        requireThat(secretRoom(run.room) || body.invite === run.invite, "Invalid invitation", 403);
         const p = this.addParticipant(run, s, body.name, body.roles); this.save(run);
         this.track(run, "participant_joined", { participant_name: p.name, participant_id: p.id });
         return response({ token: p.token, room: run.room });
@@ -356,14 +368,21 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/health") return response({ ok: true });
-    if (url.pathname === "/api/scenarios") return response({ scenarios: catalog.map(overview), coachMode: modelEnabled(env) ? "model" : "authored" });
-    if (url.pathname === "/api/runs" && request.method === "POST") {
-      const room = crypto.randomUUID().slice(0, 8);
+    if (url.pathname === "/health") return response({ ok: true, roomCreation: "certificate-v1", creatorConfigured: creatorConfigured(env) });
+    if (url.pathname === "/api/scenarios") return response({ scenarios: catalog.map(overview), coachMode: modelEnabled(env) ? "model" : "authored", roomCreation: "certificate" });
+    if (["/api/runs", "/api/room-creation/challenge"].includes(url.pathname) && request.method === "POST") {
+      if (!creatorConfigured(env)) return response({ error: "Room creation is not configured" }, 503);
       const raw = await request.text(); if (raw.length > 12000) return response({ error: "Request too large" }, 413);
       let body; try { body = JSON.parse(raw); } catch { return response({ error: "Invalid JSON" }, 400); }
-      const init = new Request(new URL(`/agents/rehearsal/${room}`, request.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, op: "init", room }) });
-      return await routeAgentRequest(init, env) ?? response({ error: "Agent routing failed" }, 500);
+      if (url.pathname === "/api/runs" && (!body?.proof || typeof body.proof.challengeId !== "string" || typeof body.proof.signature !== "string")) return response({ error: "Choose your room creator certificate" }, 401);
+      try {
+        const intent = creationIntent(body), hash = await digest(JSON.stringify(intent)), authority = await authorityAgent(env);
+        if (url.pathname.endsWith("/challenge")) { const challenge = await authority.challenge(hash, intent.requestId); return response(challenge, "status" in challenge ? challenge.status : 200); }
+        const room = await authority.authorizeCreation(body.proof.challengeId, body.proof.signature, hash);
+        if (!room) return response({ error: "Creator certificate proof is invalid or expired" }, 403);
+        const agent = await getAgentByName(env.Rehearsal, room);
+        return response(await agent.initialize({ ...intent, room }));
+      } catch { return response({ error: "Invalid room creation request" }, 400); }
     }
     if (url.pathname.startsWith("/agents/") && !url.pathname.startsWith("/agents/rehearsal/")) return response({ error: "Unknown route" }, 404);
     if (url.pathname.startsWith("/agents/")) return await routeAgentRequest(request, env) ?? response({ error: "Unknown route" }, 404);

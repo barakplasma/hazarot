@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { chromium } from "@playwright/test";
 import { mkdirSync, mkdtempSync, cpSync, createWriteStream, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { makeCreator } from './creator-fixture.mjs';
 
 mkdirSync("qa",{recursive:true});
 const binary=process.env.CELLD_BIN||(existsSync(".tools/bin/celld")?resolve(".tools/bin/celld"):"celld");
@@ -15,9 +16,11 @@ const fixture=createServer(async(req,res)=>{
 });
 await new Promise(r=>fixture.listen(0,"127.0.0.1",r));
 const project=mkdtempSync(resolve(".build/browser-"));
+const creator=makeCreator('http://127.0.0.1:9988'), certificatePath=`${project}/creator.json`;
+writeFileSync(certificatePath, JSON.stringify(creator.bundle));
 for(const dir of ["src","public"]) cpSync(dir,`${project}/${dir}`,{recursive:true});
 cpSync("wrangler.jsonc",`${project}/wrangler.jsonc`);
-writeFileSync(`${project}/.dev.vars`,`MODEL_BASE_URL=http://127.0.0.1:${fixture.address().port}/v1\nMODEL_NAME=fixture\n`);
+writeFileSync(`${project}/.dev.vars`,creator.vars+`AI_MINUTE_CALLS=200\nMODEL_BASE_URL=http://127.0.0.1:${fixture.address().port}/v1\nMODEL_NAME=fixture\n`);
 const child=spawn(binary,["dev",project,"--host","127.0.0.1","--port","9988","--no-watch","--logs"],{detached:true,env:{...process.env,PATH:`${process.cwd()}/node_modules/.bin:${process.env.PATH}`},stdio:["ignore","pipe","pipe"]});
 const log=createWriteStream("qa/browser-runtime.log"); child.stdout.pipe(log,{end:false});child.stderr.pipe(log,{end:false});
 const base="http://127.0.0.1:9988",sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -34,7 +37,7 @@ try{
   await page.getByRole("heading",{name:"The DJ is stuck in traffic",exact:true}).waitFor();
   await page.screenshot({path:"qa/welcome.png",fullPage:true});
   await page.getByRole("button",{name:/Incident response.*CI credentials exposed/}).click();
-  await page.getByLabel("Your name").fill("Amira");await page.getByRole("button",{name:"Create rehearsal room"}).click();
+  await page.getByLabel("Your name").fill("Amira");await page.locator('#creator-certificate').setInputFiles(certificatePath);await page.getByRole("button",{name:"Create rehearsal room"}).click();
   await page.getByRole("button",{name:"Start round",exact:true}).waitFor();
   await page.getByRole("button",{name:"Invite participants"}).click();
   const invite=await page.locator("#modal-input").inputValue();
@@ -99,6 +102,7 @@ try{
   await page.getByRole("button",{name:"Replay",exact:true}).click();await page.getByRole("button",{name:"Confirm",exact:true}).click();
   await page.getByRole("button",{name:"Create rehearsal room",exact:true}).waitFor();
   assert.equal(await page.getByLabel("Your name").inputValue(),"Amira");
+  await page.locator('#creator-certificate').setInputFiles(certificatePath);
   await page.getByRole("button",{name:"Create rehearsal room",exact:true}).click();await page.getByRole("button",{name:"Start round",exact:true}).waitFor();
   assert.equal(await page.getByText("Acknowledged. I will report findings in two minutes.",{exact:true}).count(),0);
   pass("Premature declaration produces an honest debrief; replay creates a clean room");

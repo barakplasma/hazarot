@@ -14,7 +14,7 @@ if (enabled) { try {
   });
   ready = true;
   const room = new URLSearchParams(location.search).get('room');
-  posthog.capture('$pageview', /^[a-f0-9]{8}$/.test(room || '') ? { room_id: room } : {});
+  posthog.capture('$pageview', /^(?:[a-f0-9]{8}|[0-9A-HJKMNP-TV-Z]{16})$/.test(room || '') ? { room_id: room } : {});
 } catch { /* Analytics never blocks play. */ } }
 export function trackCommand(details) {
   if (ready) { try { posthog.capture('rehearsal_ui_command', safeDetails(details)); } catch { /* Analytics never blocks play. */ } }

@@ -176,10 +176,17 @@ bucket-backed fleet and validate recovery separately; do not scale this manifest
   them. AI context filtering is separate and enforced server-side.
 - Invitation links and participant tokens are bearer capabilities. Tokens persist
   in that browser's local storage. Use trusted pilot groups; this is not SSO.
-- Room access uses the per-room shared invitation secret stored in celld, not a
-  Kubernetes Secret or deployment-wide password. Anyone reaching the app can
-  create a new room; use trusted pilot access at the ingress if limiting room
-  creation and inference usage is needed.
+- New room IDs are the 16-character random suffix of a cryptographic ULID.
+  Possessing the room link grants entry; no separate invitation password is needed.
+  Legacy eight-character rooms still require their old invitation secret.
+- Creating rooms requires a signed challenge from a pinned creator certificate.
+  The browser reads the certificate bundle locally; it sends only a signature.
+  This is application authorization, not mTLS or an operating-system certificate.
+  See [creator access](docs/creator-access.md) for Android and automation usage.
+- A singleton SDK Agent enforces inference limits across rooms and restarts.
+  Defaults: 100 attempts/day, 20/room, 6/minute, 2 concurrent. Authored replies
+  remain available after a limit is reached. These are request limits, not a
+  provider-enforced dollar ceiling.
 - Scenarios are trusted, operator-authored files. Client-rendered content uses
   text nodes, never raw scenario HTML. Do not publish the server catalog as assets.
 - Authored observations are not employee scores. Facilitators should challenge

@@ -6,10 +6,12 @@ import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync, createWriteStream } from "node:fs";
 import { resolve } from "node:path";
 import WebSocket from "ws";
+import { makeCreator, signedCreate } from './creator-fixture.mjs';
 
 mkdirSync(".build", { recursive: true });
 const root = process.cwd(), project = mkdtempSync(resolve(".build/integration-")), port = 9987;
 const base = `http://127.0.0.1:${port}`;
+const creator = makeCreator(base);
 const binary = process.env.CELLD_BIN || (existsSync(".tools/bin/celld") ? resolve(".tools/bin/celld") : "celld");
 const checks = [], sockets = [], modelRequests = [], analyticsRequests = [];
 let child, modelDelay = 0, modelFailure = false;
@@ -44,7 +46,7 @@ const model = createServer(async (req, res) => {
   res.end(JSON.stringify({ id: "fixture", object: "chat.completion", created: Math.floor(Date.now()/1000), model: "fixture", choices: [{ index: 0, message: { role: "assistant", content: "Ask the decision owner to acknowledge your request, then agree a next-update time. [TEST MODEL]" }, finish_reason: "stop" }], usage: { prompt_tokens: 20, completion_tokens: 15, total_tokens: 35 } }));
 });
 await new Promise(r => model.listen(0, "127.0.0.1", r));
-writeFileSync(`${project}/.dev.vars`, `MODEL_BASE_URL=http://127.0.0.1:${model.address().port}/v1\nMODEL_NAME=fixture\nPOSTHOG_ENABLED=true\nPOSTHOG_API_HOST=http://127.0.0.1:${model.address().port}\n`);
+writeFileSync(`${project}/.dev.vars`, creator.vars + `AI_MINUTE_CALLS=200\nAI_DAILY_CALLS=200\nAI_ROOM_CALLS=100\nMODEL_BASE_URL=http://127.0.0.1:${model.address().port}/v1\nMODEL_NAME=fixture\nPOSTHOG_ENABLED=true\nPOSTHOG_API_HOST=http://127.0.0.1:${model.address().port}\n`);
 
 async function wait(fn, timeout = 12000) { const until = Date.now()+timeout; let error; while(Date.now()<until) { try { const v=await fn(); if(v) return v; } catch(e) { error=e; } await sleep(100); } throw new Error(`Timed out: ${error?.message || "condition"}`); }
 async function api(path, body, token, expected = 200, headers = {}) {
@@ -61,7 +63,7 @@ async function stop() {
   const done=once(child,"exit"); process.kill(-child.pid,"SIGTERM"); const timer=setTimeout(()=>{try{process.kill(-child.pid,"SIGKILL");}catch{}},3000);
   try{await done;}finally{clearTimeout(timer);}
 }
-async function create(scenarioId, roles, name="Amira") { const result=await api("/api/runs",{scenarioId,name,roles}); return {...result,path:`/agents/rehearsal/${result.room}`}; }
+async function create(scenarioId, roles, name="Amira") { const result=await api("/api/runs",await signedCreate(base,creator.bundle,{scenarioId,name,roles})); return {...result,path:`/agents/rehearsal/${result.room}`}; }
 const cmd=(r,op,more={},t=r.token,status=200)=>api(r.path,{op,commandId:crypto.randomUUID(),...more},t,status);
 const snap=(r,t=r.token)=>api(r.path,undefined,t);
 function passed(label){ checks.push(label); console.log(`PASS ${label}`); }
@@ -70,8 +72,20 @@ try {
   await start();
   const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,4); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
   passed("Public catalog excludes hidden scenario facts");
-  const r=await create("ci-credentials",["commander"]);
-  await api(r.path,undefined,undefined,401); await api(r.path,{op:"join",invite:"wrong",name:"X",roles:["platform"]},undefined,403);
+  const fields={scenarioId:'ci-credentials',roles:['commander'],name:'Amira'};
+  await api('/api/runs',fields,undefined,401);
+  const proof=await signedCreate(base,creator.bundle,fields);
+  const forged={...proof,proof:{...proof.proof,signature:'A'.repeat(86)}};
+  await api('/api/runs',forged,undefined,403);
+  await api('/api/runs',{...proof,name:'Changed after signing'},undefined,403);
+  const initialized=await api('/api/runs',proof), replayed=await api('/api/runs',proof);
+  assert.deepEqual(replayed,initialized,'Replaying an authorized creation must return one room');
+  assert.match(initialized.room,/^[0-9A-HJKMNP-TV-Z]{16}$/); assert(!initialized.invite);
+  const r={...initialized,path:`/agents/rehearsal/${initialized.room}`};
+  await api('/agents/rehearsal/UNAUTHCREATION00',{op:'init',room:'UNAUTHCREATION00',...fields},undefined,403);
+  await api('/agents/authority/application',undefined,undefined,404);
+  passed('Creator signatures bind intent, reject forgery and public init, and replay one short-ULID room');
+  await api(r.path,undefined,undefined,200); await api('/agents/rehearsal/UNKNOWNROOM00000',{op:"join",name:"X",roles:["platform"]},undefined,404);
   const sam=await api(r.path,{op:"join",invite:r.invite,name:"Sam",roles:["security"]});
   const lee=await api(r.path,{op:"join",invite:r.invite,name:"Lee",roles:["platform","helpdesk"]});
   const s=await snap(r); assert.equal(s.participants.length,3); assert(s.participants.every(p=>!p.token)); assert(!JSON.stringify(s).includes("groundTruth"));
@@ -80,6 +94,11 @@ try {
 
   const ws=new WebSocket(`ws://127.0.0.1:${port}${r.path}?token=${r.token}`); sockets.push(ws); const frames=[];
   ws.on("message",data=>{try{frames.push(JSON.parse(data.toString()));}catch{}}); await once(ws,"open");
+  ws.send(JSON.stringify({type:'rpc',id:'host-token-probe',method:'initialize',args:[fields]}));
+  await wait(()=>frames.some(f=>f.type==='rpc'&&f.id==='host-token-probe'));
+  const rpc=frames.find(f=>f.type==='rpc'&&f.id==='host-token-probe');
+  assert(rpc.error && !JSON.stringify(rpc).includes(r.token));
+  passed('SDK client RPC cannot invoke the undecorated room initializer or obtain host tokens');
   await cmd(r,"start"); await wait(()=>frames.some(f=>f.type==="snapshot" && f.snapshot.phase==="active"));
   assert(frames.some(f=>f.type==="snapshot" && f.snapshot.me.id===s.me.id));
   assert(!frames.some(f=>f.snapshot?.roleCards?.some(r=>r.id==="security")));
@@ -192,7 +211,7 @@ try {
   const events = analyticsRequests.flatMap(r => r.batch || []);
   assert(events.some(e => e.properties.room_id === r.room && e.properties.participant_name === "Amira"));
   const wire = JSON.stringify(events);
-  for (const secret of [r.token, r.invite, "PRIVATE-SAM-CANARY", "What should I communicate next?"]) assert(!wire.includes(secret));
+  for (const secret of [r.token, r.invite, "PRIVATE-SAM-CANARY", "What should I communicate next?"].filter(Boolean)) assert(!wire.includes(secret));
   passed("Real celld delivers PostHog events with room IDs and names, excluding credentials and message bodies");
 
   const late=await create("offsite",["manager"]); await cmd(late,"start"); modelDelay=600;

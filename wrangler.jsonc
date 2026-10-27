@@ -19,6 +19,10 @@
       {
         "name": "Character",
         "class_name": "Character"
+      },
+      {
+        "name": "Authority",
+        "class_name": "Authority"
       }
     ]
   },
@@ -34,6 +38,10 @@
       "new_sqlite_classes": [
         "Character"
       ]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["Authority"]
     }
   ]
 }

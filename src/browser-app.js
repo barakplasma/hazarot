@@ -1,4 +1,5 @@
 import { trackCommand } from "./analytics/browser.js";
+import { creationIntent, signCreation } from "./creator-protocol.js";
 const $ = (id) => document.getElementById(id);
 const make = (tag, text, className) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (className) e.className = className; return e; };
 const params = new URLSearchParams(location.search);
@@ -111,6 +112,7 @@ function showSetup(s, joining = false) {
   $("setup-title").textContent = joining ? `Join ${s.title}` : "Set up your room";
   $("setup-description").textContent = "Choose responsibilities for this round. Combine roles in a small group; rotate them on replay.";
   $("create-room").textContent = joining ? "Join rehearsal room" : "Create rehearsal room";
+  $("creator-certificate-label").hidden = joining; $("creator-certificate").required = !joining;
   $("role-choices").replaceChildren();
   for (const [index, r] of s.roles.entries()) {
     const label = make("label", undefined, "role-choice"), input = make("input"); input.type = "checkbox"; input.name = "roles"; input.value = r.id; input.checked = index === 0;
@@ -122,6 +124,7 @@ function showSetup(s, joining = false) {
 function saveSession(data, name) {
   room = data.room; session = { token: data.token, name }; localStorage.setItem(`rehearsal:${room}`, JSON.stringify(session)); localStorage.setItem("rehearsal:name", name);
   if (data.invite) invite = data.invite;
+  if (room.length === 16) invite = null;
   const query = new URLSearchParams({ room }); if (invite) query.set("invite", invite);
   history.replaceState(null, "", `/?${query}`);
 }
@@ -131,9 +134,19 @@ $("setup-form").onsubmit = async (event) => {
   if (!roles.length) { notice("Choose at least one responsibility."); return; }
   const name = $("participant-name").value.trim(); $("create-room").disabled = true;
   try {
+    let intent;
+    if (!room) {
+      const file = $("creator-certificate").files[0];
+      if (!file || file.size > 12000) throw new Error("Choose your room creator certificate bundle");
+      const bundle = JSON.parse(await file.text());
+      if (bundle.origin !== location.origin) throw new Error("This creator certificate belongs to a different site");
+      intent = creationIntent({ scenarioId: selected.id, name, roles, requestId: crypto.randomUUID() });
+      const challenge = await api("/api/room-creation/challenge", { method: "POST", body: JSON.stringify(intent) });
+      intent.proof = { challengeId: challenge.challengeId, signature: await signCreation(bundle, challenge.challenge) };
+    }
     const data = room
       ? await api(`${endpoint()}`, { method: "POST", body: JSON.stringify({ op: "join", name, roles, invite }) })
-      : await api("/api/runs", { method: "POST", body: JSON.stringify({ scenarioId: selected.id, name, roles }) });
+      : await api("/api/runs", { method: "POST", body: JSON.stringify(intent) });
     saveSession(data, name); connect(); await refresh();
   } catch (error) { notice(error.message); }
   finally { $("create-room").disabled = false; }
@@ -274,7 +287,7 @@ $("composer").onsubmit = async (event) => {
 };
 $("message").onkeydown = event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit($("composer").querySelector("button")); } };
 $("invite").onclick = () => {
-  const url = `${location.origin}/?room=${encodeURIComponent(room)}&invite=${encodeURIComponent(snapshot.invite)}`;
+  const url = `${location.origin}/?room=${encodeURIComponent(room)}${room.length === 16 ? "" : `&invite=${encodeURIComponent(snapshot.invite)}`}`;
   dialog("Invite your teammates", "Share this invitation before starting. Each teammate chooses their name and responsibilities. Keep the link within your group.", async () => {} , true);
   $("modal-input").value = url; $("modal-input").readOnly = true; $("modal-confirm").textContent = "Done";
 };
