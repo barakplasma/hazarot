@@ -16,8 +16,7 @@ const fixture=createServer(async(req,res)=>{
 });
 await new Promise(r=>fixture.listen(0,"127.0.0.1",r));
 const project=mkdtempSync(resolve(".build/browser-"));
-const creator=makeCreator('http://127.0.0.1:9988'), certificatePath=`${project}/creator.json`;
-writeFileSync(certificatePath, JSON.stringify(creator.bundle));
+const creator=makeCreator('http://127.0.0.1:9988');
 for(const dir of ["src","public"]) cpSync(dir,`${project}/${dir}`,{recursive:true});
 cpSync("wrangler.jsonc",`${project}/wrangler.jsonc`);
 writeFileSync(`${project}/.dev.vars`,creator.vars+`AI_MINUTE_CALLS=200\nMODEL_BASE_URL=http://127.0.0.1:${fixture.address().port}/v1\nMODEL_NAME=fixture\n`);
@@ -33,16 +32,20 @@ try{
   const host=await browser.newContext({viewport:{width:1440,height:1000}}),guest=await browser.newContext({viewport:{width:1200,height:900}});
   const page=await host.newPage(),peer=await guest.newPage();
   for(const p of [page,peer]){p.on("pageerror",e=>errors.push(e.message));p.on("console",m=>{if(m.type()==="error")errors.push(m.text());});}
-  await page.goto(base);await page.getByRole("heading",{name:"Rare situations."}).waitFor();
+  await page.goto(`${base}/#admin=${creator.token}`);
+  assert.equal(new URL(page.url()).hash, "");
+  assert.equal(await page.evaluate(()=>localStorage.getItem("hazarot:admin-token")),creator.token);await page.getByRole("heading",{name:"Rare situations."}).waitFor();
   await page.getByRole("heading",{name:"The DJ is stuck in traffic",exact:true}).waitFor();
   await page.screenshot({path:"qa/welcome.png",fullPage:true});
   await page.getByRole("button",{name:/Incident response.*CI credentials exposed/}).click();
-  await page.getByLabel("Your name").fill("Amira");await page.locator('#creator-certificate').setInputFiles(certificatePath);await page.getByRole("button",{name:"Create rehearsal room"}).click();
+  await page.getByLabel("Your name").fill("Amira");await page.getByRole("button",{name:"Create rehearsal room"}).click();
   await page.getByRole("button",{name:"Start round",exact:true}).waitFor();
   await page.getByRole("button",{name:"Invite participants"}).click();
   const invite=await page.locator("#modal-input").inputValue();
   await page.getByRole("button",{name:"Done",exact:true}).click();
-  await peer.goto(invite);await peer.getByLabel("Your name").fill("Sam");
+  assert(!invite.includes(creator.token));
+  await peer.goto(invite);
+  assert.equal(await peer.evaluate(()=>localStorage.getItem("hazarot:admin-token")),null);await peer.getByLabel("Your name").fill("Sam");
   await peer.locator('input[value="commander"]').uncheck();await peer.locator('input[value="security"]').check();
   await peer.getByRole("button",{name:"Join rehearsal room"}).click();
   await peer.getByRole("heading",{name:"Coordination",exact:true}).waitFor();
@@ -102,7 +105,7 @@ try{
   await page.getByRole("button",{name:"Replay",exact:true}).click();await page.getByRole("button",{name:"Confirm",exact:true}).click();
   await page.getByRole("button",{name:"Create rehearsal room",exact:true}).waitFor();
   assert.equal(await page.getByLabel("Your name").inputValue(),"Amira");
-  await page.locator('#creator-certificate').setInputFiles(certificatePath);
+
   await page.getByRole("button",{name:"Create rehearsal room",exact:true}).click();await page.getByRole("button",{name:"Start round",exact:true}).waitFor();
   assert.equal(await page.getByText("Acknowledged. I will report findings in two minutes.",{exact:true}).count(),0);
   pass("Premature declaration produces an honest debrief; replay creates a clean room");

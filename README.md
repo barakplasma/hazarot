@@ -179,9 +179,9 @@ bucket-backed fleet and validate recovery separately; do not scale this manifest
 - New room IDs are the 16-character random suffix of a cryptographic ULID.
   Possessing the room link grants entry; no separate invitation password is needed.
   Legacy eight-character rooms still require their old invitation secret.
-- Creating rooms requires a signed challenge from a pinned creator certificate.
-  The browser reads the certificate bundle locally; it sends only a signature.
-  This is application authorization, not mTLS or an operating-system certificate.
+- Creating rooms requires an admin token installed by a special setup link.
+  The URL fragment is cleared before analytics and the token stays in local storage.
+  The deployment stores only its SHA-256 digest.
   See [creator access](docs/creator-access.md) for Android and automation usage.
 - A singleton SDK Agent enforces inference limits across rooms and restarts.
   Defaults: 100 attempts/day, 20/room, 6/minute, 2 concurrent. Authored replies

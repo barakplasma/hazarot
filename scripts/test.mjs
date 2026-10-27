@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, cpSync, writeFileSync, readFileSync, existsSync, createWriteStream } from "node:fs";
 import { resolve } from "node:path";
 import WebSocket from "ws";
-import { makeCreator, signedCreate } from './creator-fixture.mjs';
+import { makeCreator, creation } from './creator-fixture.mjs';
 
 mkdirSync(".build", { recursive: true });
 const root = process.cwd(), project = mkdtempSync(resolve(".build/integration-")), port = 9987;
@@ -63,7 +63,7 @@ async function stop() {
   const done=once(child,"exit"); process.kill(-child.pid,"SIGTERM"); const timer=setTimeout(()=>{try{process.kill(-child.pid,"SIGKILL");}catch{}},3000);
   try{await done;}finally{clearTimeout(timer);}
 }
-async function create(scenarioId, roles, name="Amira") { const result=await api("/api/runs",await signedCreate(base,creator.bundle,{scenarioId,name,roles})); return {...result,path:`/agents/rehearsal/${result.room}`}; }
+async function create(scenarioId, roles, name="Amira") { const result=await api("/api/runs",creation({scenarioId,name,roles}),creator.token); return {...result,path:`/agents/rehearsal/${result.room}`}; }
 const cmd=(r,op,more={},t=r.token,status=200)=>api(r.path,{op,commandId:crypto.randomUUID(),...more},t,status);
 const snap=(r,t=r.token)=>api(r.path,undefined,t);
 function passed(label){ checks.push(label); console.log(`PASS ${label}`); }
@@ -74,17 +74,17 @@ try {
   passed("Public catalog excludes hidden scenario facts");
   const fields={scenarioId:'ci-credentials',roles:['commander'],name:'Amira'};
   await api('/api/runs',fields,undefined,401);
-  const proof=await signedCreate(base,creator.bundle,fields);
-  const forged={...proof,proof:{...proof.proof,signature:'A'.repeat(86)}};
-  await api('/api/runs',forged,undefined,403);
-  await api('/api/runs',{...proof,name:'Changed after signing'},undefined,403);
-  const initialized=await api('/api/runs',proof), replayed=await api('/api/runs',proof);
+  const intent=creation(fields);
+  await api('/api/runs',intent,'A'.repeat(43),403);
+  const initialized=await api('/api/runs',intent,creator.token), replayed=await api('/api/runs',intent,creator.token);
+  await api('/api/runs',{...intent,name:'Changed intent'},creator.token,409);
+  await api('/api/room-creation/challenge',fields,undefined,404);
   assert.deepEqual(replayed,initialized,'Replaying an authorized creation must return one room');
   assert.match(initialized.room,/^[0-9A-HJKMNP-TV-Z]{16}$/); assert(!initialized.invite);
   const r={...initialized,path:`/agents/rehearsal/${initialized.room}`};
   await api('/agents/rehearsal/UNAUTHCREATION00',{op:'init',room:'UNAUTHCREATION00',...fields},undefined,403);
   await api('/agents/authority/application',undefined,undefined,404);
-  passed('Creator signatures bind intent, reject forgery and public init, and replay one short-ULID room');
+  passed('Admin token rejects unauthorized creation and public init; retries allocate one short-ULID room');
   await api(r.path,undefined,undefined,200); await api('/agents/rehearsal/UNKNOWNROOM00000',{op:"join",name:"X",roles:["platform"]},undefined,404);
   const sam=await api(r.path,{op:"join",invite:r.invite,name:"Sam",roles:["security"]});
   const lee=await api(r.path,{op:"join",invite:r.invite,name:"Lee",roles:["platform","helpdesk"]});

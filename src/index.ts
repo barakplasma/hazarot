@@ -6,7 +6,7 @@ import { coach, modelEnabled, type ModelConfig } from "./coach";
 import { Character } from "./character";
 import { Authority, authorityAgent, creatorConfigured, type AuthorityEnv } from "./authority";
 // @ts-expect-error Shared browser/Worker protocol.
-import { creationIntent, digest } from "./creator-protocol.js";
+import { creationIntent, digest } from "./creation-intent.js";
 export { Character, Authority };
 import type { Run, Participant, Scenario, Message } from "./types";
 
@@ -253,7 +253,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       requireThat(request.method === "POST", "Method not allowed", 405);
       const raw = await request.text(); requireThat(raw.length <= 24000, "Request too large", 413);
       let body: any; try { body = JSON.parse(raw); } catch { throw new RequestError("Invalid JSON"); }
-      requireThat(body.op !== "init", "A creator certificate is required to create rooms", 403);
+      requireThat(body.op !== "init", "An admin token is required to create rooms", 403);
       requireThat(run, "Room not found", 404);
       const s = this.scenario(run);
       if (body.op === "join") {
@@ -368,22 +368,28 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/health") return response({ ok: true, roomCreation: "certificate-v1", creatorConfigured: creatorConfigured(env) });
-    if (url.pathname === "/api/scenarios") return response({ scenarios: catalog.map(overview), coachMode: modelEnabled(env) ? "model" : "authored", roomCreation: "certificate" });
-    if (["/api/runs", "/api/room-creation/challenge"].includes(url.pathname) && request.method === "POST") {
+    if (url.pathname === "/health") return response({ ok: true, roomCreation: "admin-token-v1", creatorConfigured: creatorConfigured(env) });
+    if (url.pathname === "/api/scenarios") return response({ scenarios: catalog.map(overview), coachMode: modelEnabled(env) ? "model" : "authored", roomCreation: "admin-token" });
+    if (url.pathname === "/api/runs" && request.method === "POST") {
       if (!creatorConfigured(env)) return response({ error: "Room creation is not configured" }, 503);
+      const token = request.headers.get("authorization")?.match(/^Bearer ([a-zA-Z0-9_-]{43})$/)?.[1];
+      if (!token) return response({ error: "Open your admin setup link to enable room creation" }, 401);
+      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
+      const expected = env.CREATOR_TOKEN_SHA256!;
+      // Compare all bytes; only a one-way digest is deployed, never the token.
+      let difference = 0;
+      for (let i = 0; i < hash.length; i++) difference |= hash[i] ^ parseInt(expected.slice(i * 2, i * 2 + 2), 16);
+      if (difference) return response({ error: "Admin token is invalid; open your current setup link" }, 403);
       const raw = await request.text(); if (raw.length > 12000) return response({ error: "Request too large" }, 413);
-      let body; try { body = JSON.parse(raw); } catch { return response({ error: "Invalid JSON" }, 400); }
-      if (url.pathname === "/api/runs" && (!body?.proof || typeof body.proof.challengeId !== "string" || typeof body.proof.signature !== "string")) return response({ error: "Choose your room creator certificate" }, 401);
       try {
-        const intent = creationIntent(body), hash = await digest(JSON.stringify(intent)), authority = await authorityAgent(env);
-        if (url.pathname.endsWith("/challenge")) { const challenge = await authority.challenge(hash, intent.requestId); return response(challenge, "status" in challenge ? challenge.status : 200); }
-        const room = await authority.authorizeCreation(body.proof.challengeId, body.proof.signature, hash);
-        if (!room) return response({ error: "Creator certificate proof is invalid or expired" }, 403);
+        const intent = creationIntent(JSON.parse(raw)), authority = await authorityAgent(env);
+        const room = await authority.allocateRoom(intent.requestId, await digest(JSON.stringify(intent)));
+        if (!room) return response({ error: "Creation request ID was already used for different settings" }, 409);
         const agent = await getAgentByName(env.Rehearsal, room);
         return response(await agent.initialize({ ...intent, room }));
       } catch { return response({ error: "Invalid room creation request" }, 400); }
     }
+    if (url.pathname.startsWith("/api/room-creation/")) return response({ error: "Unknown route" }, 404);
     if (url.pathname.startsWith("/agents/") && !url.pathname.startsWith("/agents/rehearsal/")) return response({ error: "Unknown route" }, 404);
     if (url.pathname.startsWith("/agents/")) return await routeAgentRequest(request, env) ?? response({ error: "Unknown route" }, 404);
     const asset = await env.ASSETS.fetch(request);

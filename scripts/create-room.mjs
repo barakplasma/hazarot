@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { signedCreate } from './creator-fixture.mjs';
+import { creation } from './creator-fixture.mjs';
 const args=process.argv.slice(2), value=(key,fallback)=>args.includes(key)?args[args.indexOf(key)+1]:fallback;
-const certificate=value('--certificate','.tools/hazarot-room-creator.json'), bundle=JSON.parse(readFileSync(certificate,'utf8'));
-const intent=await signedCreate(bundle.origin,bundle,{scenarioId:value('--scenario','wedding-traffic'),name:value('--name','Facilitator'),roles:value('--roles','coordinator').split(',')});
-const response=await fetch(bundle.origin+'/api/runs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(intent)});
+const setup=JSON.parse(readFileSync(value('--admin-file','.tools/hazarot-admin.json'),'utf8'));
+const url=new URL(setup.url),token=new URLSearchParams(url.hash.slice(1)).get('admin');
+const intent=creation({scenarioId:value('--scenario','wedding-traffic'),name:value('--name','Facilitator'),roles:value('--roles','coordinator').split(',')});
+const response=await fetch(url.origin+'/api/runs',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${token}`},body:JSON.stringify(intent)});
 const run=await response.json();if(!response.ok)throw new Error(run.error);
 const sessionPath=value('--session-file','.tools/created-room-session.json');
-writeFileSync(sessionPath,JSON.stringify({...run,origin:bundle.origin},null,2)+'\n',{mode:0o600});
-console.log(JSON.stringify({room:run.room,url:`${bundle.origin}/?room=${run.room}`,sessionPath},null,2));
+writeFileSync(sessionPath,JSON.stringify({...run,origin:url.origin},null,2)+'\n',{mode:0o600});
+console.log(JSON.stringify({room:run.room,url:`${url.origin}/?room=${run.room}`,sessionPath},null,2));

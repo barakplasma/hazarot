@@ -1,23 +1,22 @@
 import { Agent, getAgentByName } from "agents";
 import type { Connection } from "agents";
 import { ulid } from "ulid";
-// @ts-expect-error Shared, dependency-free browser/Worker protocol.
-import { base64url, decode64 } from "./creator-protocol.js";
 
 export type AuthorityConfig = {
-  CREATOR_PUBLIC_KEY_SPKI?: string; CREATOR_CERT_EXPIRES_AT?: string; CREATOR_ORIGIN?: string;
+  CREATOR_TOKEN_SHA256?: string;
   AI_DAILY_CALLS?: string; AI_ROOM_CALLS?: string; AI_MINUTE_CALLS?: string; AI_CONCURRENT_CALLS?: string;
 };
 export type AuthorityEnv = AuthorityConfig & { Authority: DurableObjectNamespace<Authority> };
 export const authorityAgent = (env: AuthorityEnv) => getAgentByName(env.Authority, "application");
-export const creatorConfigured = (env: AuthorityConfig) => Boolean(env.CREATOR_PUBLIC_KEY_SPKI && env.CREATOR_ORIGIN && Date.parse(env.CREATOR_CERT_EXPIRES_AT || "") > Date.now());
+export const creatorConfigured = (env: AuthorityConfig) => /^[a-f0-9]{64}$/.test(env.CREATOR_TOKEN_SHA256 || "");
 
-// Singleton private SDK Agent: durable nonces, idempotent room allocation, and a
+// Singleton private SDK Agent: idempotent room allocation and a
 // shared inference allowance. Public routes never expose this Agent or its state.
 export class Authority extends Agent<AuthorityConfig, { protocol: number }> {
   initialState = { protocol: 1 };
   onStart() {
-    this.sql`CREATE TABLE IF NOT EXISTS creator_challenges (id TEXT PRIMARY KEY, digest TEXT NOT NULL, challenge TEXT NOT NULL, expires INTEGER NOT NULL, request_id TEXT NOT NULL, room TEXT)`;
+    this.sql`CREATE TABLE IF NOT EXISTS room_creations (request_id TEXT PRIMARY KEY, digest TEXT NOT NULL, room TEXT NOT NULL)`;
+    this.sql`DROP TABLE IF EXISTS creator_challenges`;
     this.sql`CREATE TABLE IF NOT EXISTS inference_counters (id TEXT PRIMARY KEY, count INTEGER NOT NULL)`;
     this.sql`CREATE TABLE IF NOT EXISTS inference_attempts (id TEXT PRIMARY KEY, room TEXT NOT NULL, at INTEGER NOT NULL, active INTEGER NOT NULL)`;
   }
@@ -29,33 +28,12 @@ export class Authority extends Agent<AuthorityConfig, { protocol: number }> {
     if (n >= limit) return false;
     this.sql`INSERT INTO inference_counters(id,count) VALUES(${id},1) ON CONFLICT(id) DO UPDATE SET count=count+1`; return true;
   }
-  challenge(digest: string, requestId: string) {
-    if (!creatorConfigured(this.env)) return { error: "Room creation is not configured", status: 503 };
-    this.sql`DELETE FROM creator_challenges WHERE expires<${Date.now()}`;
-    if (!this.bump(`challenge:${Math.floor(Date.now() / 60000)}`, 60)) return { error: "Too many creation attempts; wait a minute", status: 429 };
-    const id = base64url(crypto.getRandomValues(new Uint8Array(32))), expiresAt = Date.now() + 300000;
-    const challenge = `Hazarot room creation v1\n${this.env.CREATOR_ORIGIN}\n${id}\n${digest}`;
-    this.sql`INSERT INTO creator_challenges(id,digest,challenge,expires,request_id) VALUES(${id},${digest},${challenge},${expiresAt},${requestId})`;
-    return { challengeId: id, challenge, expiresAt };
-  }
-  async authorizeCreation(challengeId: string, signature: string, digest: string) {
-    if (!creatorConfigured(this.env) || !/^[a-zA-Z0-9_-]{43}$/.test(challengeId) || !/^[a-zA-Z0-9_-]{86}$/.test(signature)) return null;
-    const row = this.sql<{ challenge: string; digest: string; expires: number; request_id: string }>`SELECT challenge,digest,expires,request_id FROM creator_challenges WHERE id=${challengeId}`[0];
-    if (!row || row.digest !== digest || row.expires < Date.now()) return null;
-    try {
-      const key = await crypto.subtle.importKey("spki", decode64(this.env.CREATOR_PUBLIC_KEY_SPKI!), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
-      if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, decode64(signature), new TextEncoder().encode(row.challenge))) return null;
-    } catch { return null; }
-    // Check again after crypto yields. Concurrent or repeated proofs allocate one room.
-    const current = this.sql<{ room: string | null; expires: number }>`SELECT room,expires FROM creator_challenges WHERE id=${challengeId}`[0];
-    if (!current || current.expires < Date.now()) return null;
-    if (current.room) return current.room;
-    const prior = this.sql<{ room: string; digest: string }>`SELECT room,digest FROM creator_challenges WHERE request_id=${row.request_id} AND room IS NOT NULL`[0];
+  allocateRoom(requestId: string, digest: string) {
+    const prior = this.sql<{ room: string; digest: string }>`SELECT room,digest FROM room_creations WHERE request_id=${requestId}`[0];
     if (prior) return prior.digest === digest ? prior.room : null;
-    // Keep the complete 80-bit random suffix, drop the predictable timestamp.
-    // Use independent cryptographic ULIDs, never the monotonic generator.
+    // Keep the independent ULID's 80 random bits, without its timestamp.
     const room = ulid().slice(10);
-    this.sql`UPDATE creator_challenges SET room=${room} WHERE id=${challengeId}`;
+    this.sql`INSERT INTO room_creations(request_id,digest,room) VALUES(${requestId},${digest},${room})`;
     return room;
   }
   reserveInference(id: string, room: string) {

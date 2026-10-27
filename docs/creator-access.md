@@ -1,64 +1,41 @@
-# Room creation and entry
+# Room creation access
 
-The site and scenario catalog are public. Creating a room requires the creator
-certificate bundle. Knowing an existing room ID grants permission to join it;
-participants then receive separate session tokens so role and facilitator checks
-continue to apply. There is no public room directory.
+The site and scenario catalog are public. Open your private admin setup link once
+on each browser to enable room creation. Its `#admin=…` fragment is consumed into
+local storage and immediately removed from the address bar before PostHog starts.
+This works in Android Chrome without importing a file or installing a certificate.
+Use **Forget admin access** in room setup to remove it from that browser.
 
-New IDs are the complete 16-character random suffix of a cryptographically
-generated ULID (80 random bits). The timestamp is omitted; this is a short ULID
-suffix, not a full sortable ULID. The monotonic generator is never used. Existing
-eight-character rooms retain their separate invitation requirement.
+The link is a reusable bearer credential: anyone holding it can create rooms.
+Keep it out of chats, screenshots, Git and analytics. Use HTTPS. Browser extensions
+and same-origin JavaScript can access local storage; this is intentionally a small
+shared-admin scheme, not mTLS or per-user authentication.
 
-## Android Chrome
+The browser sends the token only in the Authorization header of `POST /api/runs`.
+The server stores only `CREATOR_TOKEN_SHA256`, a lowercase hex SHA-256 digest of a
+32-byte random base64url token. Missing or invalid configuration denies creation.
+Use `node scripts/issue-admin.mjs` to write a private setup file and print only its digest.
+Rotate by issuing another token and deploying its digest; previous browser tokens
+stop working. No certificate, signature challenge, or passkey implementation remains.
 
-Download `hazarot-room-creator.json`. Open Hazarot, select a scenario, enter a name,
-and select the downloaded file under **Room creator certificate**. Create the
-room and share **Invite participants** with the group. Joining a room does not
-require the creator file. Select the file again after reloading the setup page.
+Room links contain independent 16-character ULID random suffixes (80 random bits),
+not the admin token. They grant joining access; participant session tokens still
+control individual actions. Legacy eight-character room IDs still require their
+original invite secret. No public room list is provided.
 
-This is not mTLS. Do not install the file as an Android system certificate.
-The bundle includes a self-signed X.509 certificate and its PKCS#8 private key.
-Web Crypto imports the key locally and signs a five-minute server challenge
-bound to the exact room-creation intent and Hazarot origin. The request sends
-only the intent and signature. The server verifies against the pinned public key;
-it does not maintain a CA, identity provider, cookies or a user directory.
+Creation request IDs are durably idempotent. A retry returns the same room;
+reusing the ID with different settings fails. Public Agent initialization and
+client RPC initialization remain disabled.
 
-Treat the bundle as a password: anyone possessing it can create rooms until it
-expires or its public key is replaced. This grants no right to enumerate rooms
-or impersonate a participant in an existing room. The certificate's public key,
-origin and expiry are deployment configuration; the private key is never deployed
-or committed. Certificate pinning and the configured expiry are authoritative,
-not a browser TLS certificate chain.
-
-## Automation and retention
-
-An authorized operator or assistant can retain the same private bundle and use:
+For authorized assistant automation, retain the setup URL in a private JSON file:
 
 ```sh
-node scripts/create-room.mjs --certificate /private/hazarot-room-creator.json \
-  --scenario wedding-traffic --roles coordinator --name Facilitator \
-  --session-file /private/hazarot-session.json
+node scripts/create-room.mjs --admin-file /private/hazarot-admin.json \
+  --scenario wedding-traffic --roles coordinator --session-file /private/session.json
 ```
 
-Only the room link and session-file path are printed. The participant token goes
-into the private session file. The issued user bundle is retained separately for
-the user and future authorized assistant work; it is absent from Git and images.
-
-To issue a replacement:
-
-```sh
-node scripts/issue-creator.mjs .tools/replacement-creator.json https://hazarot.526462738.xyz
-```
-
-Pin the reported `publicKeySpki` as `CREATOR_PUBLIC_KEY_SPKI`, `expiresAt` as
-`CREATOR_CERT_EXPIRES_AT`, and the site origin as `CREATOR_ORIGIN`. Replacement
-revokes creation with the old key. Existing rooms and participant sessions remain
-independent. Missing, expired or invalid configuration denies creation.
-
-The public HTTP Agent initializer is disabled. Server-side initialization is
-undecorated SDK RPC, inaccessible to WebSocket client RPC. Creation retries reuse
-the allocated room while the signed challenge remains valid.
+The file has a single `url` property. The script prints only the new room link;
+participant credentials go to the private session file.
 
 ## Inference allowance
 
@@ -85,7 +62,6 @@ limit other applications sharing the OpenRouter key.
 
 At the owner's request, PostHog receives actual room IDs and participant names
 for correlation and access to rehearsals. Room IDs therefore are intentionally
-shared with that trusted analytics project. It receives no creator certificate,
-private key, participant token, inference credential, chat text, prompt or reply.
+shared with that trusted analytics project. It receives no admin setup token, participant token, inference credential, chat text, prompt or reply.
 The browser credential input has no autocapture or session replay. Keep room
 links within the intended group and trusted tooling.
