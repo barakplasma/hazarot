@@ -38,6 +38,13 @@ try{
   await page.getByRole("heading",{name:"The DJ is stuck in traffic",exact:true}).waitFor();
   await page.screenshot({path:"qa/welcome.png",fullPage:true});
   await page.getByRole("button",{name:/Incident response.*CI credentials exposed/}).click();
+  await page.getByRole("button",{name:"Forget admin access"}).click();
+  await page.getByText("Open your admin setup link to enable room creation. Participants only need a room link.",{exact:true}).waitFor();
+  await page.goto(`${base}/#admin=${creator.token}`);
+  await page.getByText("Room creation enabled on this browser.",{exact:true}).waitFor();
+  assert.equal(new URL(page.url()).hash, "");
+  assert.equal(await page.evaluate(()=>localStorage.getItem("hazarot:admin-token")),creator.token);
+  pass("Admin setup links enable creation in an already-open tab and are immediately cleared");
   await page.getByLabel("Your name").fill("Amira");await page.getByRole("button",{name:"Create rehearsal room"}).click();
   await page.getByRole("button",{name:"Start round",exact:true}).waitFor();
   await page.getByRole("button",{name:"Invite participants"}).click();

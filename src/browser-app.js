@@ -107,6 +107,11 @@ function connect() {
   socket.onerror = () => { $("connection").textContent = "Connection interrupted"; updateActivity(); };
 }
 
+function updateAdminStatus() {
+  $("admin-status").textContent = adminToken() ? "Room creation enabled on this browser." : "Open your admin setup link to enable room creation. Participants only need a room link.";
+  $("forget-admin").hidden = !adminToken();
+}
+window.addEventListener("admin-access-changed", updateAdminStatus);
 function showSetup(s, joining = false) {
   selected = s;
   $("setup-form").hidden = false;
@@ -114,8 +119,7 @@ function showSetup(s, joining = false) {
   $("setup-description").textContent = "Choose responsibilities for this round. Combine roles in a small group; rotate them on replay.";
   $("create-room").textContent = joining ? "Join rehearsal room" : "Create rehearsal room";
   $("admin-access").hidden = joining;
-  $("admin-status").textContent = adminToken() ? "Room creation enabled on this browser." : "Open your admin setup link to enable room creation. Participants only need a room link.";
-  $("forget-admin").hidden = !adminToken();
+  updateAdminStatus();
   $("role-choices").replaceChildren();
   for (const [index, r] of s.roles.entries()) {
     const label = make("label", undefined, "role-choice"), input = make("input"); input.type = "checkbox"; input.name = "roles"; input.value = r.id; input.checked = index === 0;
