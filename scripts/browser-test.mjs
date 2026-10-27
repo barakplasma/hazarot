@@ -36,7 +36,16 @@ try{
   assert.equal(new URL(page.url()).hash, "");
   assert.equal(await page.evaluate(()=>localStorage.getItem("hazarot:admin-token")),creator.token);await page.getByRole("heading",{name:"Rare situations."}).waitFor();
   await page.getByRole("heading",{name:"The DJ is stuck in traffic",exact:true}).waitFor();
+  await page.getByRole("heading",{name:"The agent approved its own access",exact:true}).waitFor();
+  await page.getByRole("button",{name:/AI agent incident.*The agent approved its own access/}).click();
+  await page.getByLabel("Platform engineer",{exact:false}).waitFor();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.screenshot({path:"qa/welcome.png",fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.screenshot({path:"qa/welcome-mobile.png",fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  pass("Agent incident catalog and role setup render in the tactical UI on desktop and mobile");
   await page.getByRole("button",{name:/Incident response.*CI credentials exposed/}).click();
   await page.getByRole("button",{name:"Forget admin access"}).click();
   await page.getByText("Open your admin setup link to enable room creation. Participants only need a room link.",{exact:true}).waitFor();

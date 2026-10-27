@@ -19,6 +19,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = createWriteStream(".build/test-runtime.log");
 const { parseScenario } = await import("../.build/scenario.mjs");
 const incident = parseScenario(readFileSync("scenarios/ci-credentials.md", "utf8"));
+const agentAccess = parseScenario(readFileSync("scenarios/agent-access.md", "utf8"));
 const wedding = parseScenario(readFileSync("scenarios/wedding-traffic.md", "utf8"));
 const offsite = parseScenario(readFileSync("scenarios/offsite.md", "utf8"));
 assert.throws(() => parseScenario("# no metadata"));
@@ -29,7 +30,7 @@ cpSync("src", `${project}/src`, { recursive: true }); cpSync("public", `${projec
 cpSync("wrangler.jsonc", `${project}/wrangler.jsonc`);
 // Test-only scenario accelerates time without exposing a runtime override endpoint.
 const timerScenario = { ...offsite, id: "timer-probe", exercise_minutes: .035, developments: [{ id: "early", minute: .008, speaker: "Release manager", text: "TEST development fired" }] };
-writeFileSync(`${project}/src/catalog.generated.ts`, `import type {Scenario} from './types';export const catalog: Scenario[]=${JSON.stringify([incident, offsite, wedding, timerScenario])};`);
+writeFileSync(`${project}/src/catalog.generated.ts`, `import type {Scenario} from './types';export const catalog: Scenario[]=${JSON.stringify([incident, offsite, wedding, agentAccess, timerScenario])};`);
 
 const model = createServer(async (req, res) => {
   if (req.url === "/batch/") {
@@ -70,7 +71,7 @@ function passed(label){ checks.push(label); console.log(`PASS ${label}`); }
 
 try {
   await start();
-  const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,4); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
+  const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,5); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
   passed("Public catalog excludes hidden scenario facts");
   const fields={scenarioId:'ci-credentials',roles:['commander'],name:'Amira'};
   await api('/api/runs',fields,undefined,401);
@@ -201,6 +202,12 @@ try {
   const stoppedWedding = await create("wedding-traffic", ["couple-representative"]); await cmd(stoppedWedding, "start");
   assert.equal((await cmd(stoppedWedding, "end", { endingId: "stop-event", confirmed: true })).ended.reason, "stop-event");
   passed("Wedding plan requires verified dependencies, approval, communication and handover; cancellation is explicit");
+  const agentRun=await create("agent-access",["coordinator","security","platform","service-owner"]); await cmd(agentRun,"start");
+  await cmd(agentRun,"action",{actionId:"handover",confirmed:true},agentRun.token,409);
+  for(const actionId of ["owner","preserve","contain","scope","continuity","test-control","approve-plan","communicate","handover"]) state=await cmd(agentRun,"action",{actionId,confirmed:true});
+  assert.equal(state.phase,"debrief"); assert.equal(state.ended.reason,"controlled-handover");
+  assert(state.messages.some(m=>m.text.includes("logging") && m.kind==="receipt"));
+  passed("Agent incident requires separate containment, uncertain exposure assessment, continuity and approved handover");
   const canceled=await create("offsite",["manager"]); await cmd(canceled,"start"); state=await cmd(canceled,"end",{endingId:"canceled",confirmed:true}); assert.equal(state.ended.reason,"canceled");
   passed("Second domain supports verified world endings and deliberate cancellation");
   const timed=await create("timer-probe",["manager"]); await cmd(timed,"start");

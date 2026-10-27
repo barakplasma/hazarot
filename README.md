@@ -10,7 +10,7 @@ stakeholder updates, and handoffs. This is a phase-zero proof of concept.
 - One Cloudflare Agent per room, running on self-hosted celld.
 - 1–10 participants; each can hold multiple responsibilities for small groups.
 - A shared coordination feed, individual role/coaching threads, and work threads.
-- Three Markdown scenarios: **CI credentials exposed**, **The bus isn't coming**, and **The DJ is stuck in traffic**.
+- Four Markdown scenarios: **CI credentials exposed**, **The bus isn't coming**, **The DJ is stuck in traffic**, and **The agent approved its own access**.
 - Confirmed fictional actions, role authority, and explicit approval prerequisites.
 - Timed developments, pause/resume, time limits, and scenario-defined endings.
 - Declaration endings can be premature; verified world endings need recorded facts.
