@@ -1,10 +1,11 @@
 // CI only: verify an actual Compose volume survives a container restart.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 const base=process.env.SMOKE_ORIGIN||'http://127.0.0.1:19091',file='.build/compose-session.json';
 async function api(path:string,body?:unknown,token?:string){const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'content-type':'application/json',...(token?{authorization:`Bearer ${token}`}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw new Error(`Compose smoke request failed (${r.status})`);return r.json();}
 if(process.argv[2]==='create'){
+ mkdirSync('.build',{recursive:true});
  const admin=JSON.parse(readFileSync('hazarot-admin.json','utf8')),key=new URL(admin.url).hash.slice(7);
  const run=await api('/api/runs',{scenarioId:'offsite',name:'Compose fixture',roles:['manager'],requestId:randomUUID()},key),path=`/agents/rehearsal/${run.room}`;
  for(const op of ['start','message','pause'])await api(path,{op,commandId:randomUUID(),...(op==='message'?{text:'Compose restart fixture'}:{})},run.token);
