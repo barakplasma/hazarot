@@ -4,6 +4,24 @@ Short team coordination rehearsals. Practice rare or sensitive situations before
 the real event: responsibilities, shared information, decisions, approvals,
 stakeholder updates, and handoffs. This is a phase-zero proof of concept.
 
+## Host it
+
+Docker Compose is the quickest install on a laptop or VM:
+
+```sh
+docker compose run --rm --user "$(id -u):$(id -g)" setup --origin http://localhost:9876
+docker compose up -d
+```
+
+Open the URL in the generated private `hazarot-admin.json` to create rooms.
+The setup tool is TypeScript; Docker runs it once in an official Node container.
+The application image remains based on **ghcr.io/denoland/celld** and has no Node
+runtime. Use `--build` with `HAZAROT_IMAGE=hazarot:local` if building locally.
+
+See [the hosting guide](docs/hosting.md) for HTTPS, inference credentials,
+**Kubernetes/Helm**, **Linux VM bundles**, persistent storage, backups and upgrades.
+No Cloudflare account or external database is required.
+
 ## What works
 
 - A static HTML/CSS/JavaScript chat interface with real WebSocket updates.
@@ -29,6 +47,7 @@ Put `celld` on PATH, or set `CELLD_BIN` to its executable path.
 
 ```sh
 npm ci
+node scripts/setup.ts
 npm run dev
 ```
 
@@ -143,32 +162,24 @@ This deliberately avoids a generic workflow engine, separate application
 database, autonomous NPC framework, or transport plugin SDK. Rocket.Chat is a
 possible later adapter, not a dependency of phase zero.
 
-## Kubernetes proof of concept
+## Deployment packages
 
-The Dockerfile and `k8s/poc.yaml` provide a **single-replica celld dev-mode**
-deployment with persistent local storage. This is not a production fleet or an
-HA design. It requires normal `/proc` support and a writable persistent volume.
+The maintained installation paths are [Docker Compose](compose.yaml), the
+[portable Helm chart](deploy/helm/hazarot), and prebundled Linux AMD64/ARM64 VM
+artifacts. Follow [docs/hosting.md](docs/hosting.md). The old `k8s/poc.yaml` is a
+legacy example; it does not contain the current room-creation configuration.
 
-The final OCI stage is `ghcr.io/denoland/celld:0.6.3`. Node is only a build stage.
-CI publishes a multi-architecture image for Linux ARM64 and AMD64.
-The image contains a prebundled Worker and static files, uses `no_bundle: true`,
-and runs without Node, npm, or esbuild at startup. The small entrypoint translates
-the three inference environment variables into private celld Worker bindings.
-The runtime smoke test verifies that mapping with an intentionally missing esbuild.
+All paths retain the single-writer celld 0.6.3 local store. Do not scale replicas
+or share a live data directory. The OCI final stage is the official celld image;
+Node is build/setup-only. TypeScript setup generates an admin link and a separate
+public digest without installing a certificate. Docker/Kubernetes may supply the
+provider key through `MODEL_API_KEY_FILE` instead of an environment value.
 
-```sh
-docker build -t rehearsal-poc:0.1.0 .
-# Load/push that image into your cluster's registry and adjust the manifest image.
-kubectl apply -f k8s/poc.yaml
-kubectl port-forward service/rehearsal 9876:9876
-```
-
-For inference, optionally create a `rehearsal-model` Secret containing
-`MODEL_BASE_URL`, `MODEL_NAME`, and, if needed, `MODEL_API_KEY`. The deployment
-loads it through `envFrom`. A ConfigMap alone is insufficient for API keys.
-Container and Kubernetes manifests are supplied but were not deployed in this
-environment. For multiple nodes or production, configure celld's supported
-bucket-backed fleet and validate recovery separately; do not scale this manifest.
+CI tests setup, Helm rendering, a native bundle with offline backup/restore,
+Docker Compose startup, and the published image. It publishes the `latest` image
+alias only after the image/Compose checks succeed. Use immutable SHA tags for
+repeatable upgrades. Native bundles are available in the main build's
+`hazarot-vm-bundles` artifact.
 
 ## Boundaries and limitations
 
@@ -191,7 +202,7 @@ bucket-backed fleet and validate recovery separately; do not scale this manifest
   text nodes, never raw scenario HTML. Do not publish the server catalog as assets.
 - Authored observations are not employee scores. Facilitators should challenge
   interpretations and inspect the referenced messages.
-- AI coworkers, GEPA, automatic freeform action execution, arbitrary scenario
+- GEPA, automatic freeform action execution, arbitrary scenario
   imports, thread ACLs, and measured human learning outcomes are outside phase zero.
 - There is no built-in retention/deletion UI. The local `.celld/` directory holds
   rehearsal data and should be treated accordingly.

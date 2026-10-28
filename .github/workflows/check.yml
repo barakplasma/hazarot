@@ -4,6 +4,9 @@ on:
   pull_request:
 permissions:
   contents: read
+concurrency:
+  group: hazarot-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -29,6 +32,15 @@ jobs:
       - run: npm run test:budget
       - run: npm run build:runtime
       - run: npm run test:runtime
+      - name: Install pinned Helm and validate portable deployment
+        run: |
+          curl -fsSL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz -o "$RUNNER_TEMP/helm-v3.19.0-linux-amd64.tar.gz"
+          curl -fsSL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz.sha256sum -o "$RUNNER_TEMP/helm.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum -c helm.sha256)
+          tar -xzf "$RUNNER_TEMP/helm-v3.19.0-linux-amd64.tar.gz" -C "$RUNNER_TEMP"
+          HELM_BIN="$RUNNER_TEMP/linux-amd64/helm" npm run test:deployment
+          docker compose config --quiet
+          HAZAROT_DOMAIN=rehearsal.example.com docker compose -f compose.yaml -f compose.https.yaml config --quiet
       - name: Select browser
         run: |
           chrome="$(command -v google-chrome || command -v chromium || true)"
@@ -51,6 +63,7 @@ jobs:
             .build/test-runtime.log
             .build/runtime-smoke.log
             .build/budget-runtime.log
+            .build/deployment-runtime.log
   image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: check
@@ -89,8 +102,61 @@ jobs:
           curl -fsS http://127.0.0.1:19090/health
           curl -fsS http://127.0.0.1:19090/api/scenarios | jq -e '.coachMode == "model" and (.scenarios | any(.id == "wedding-traffic"))'
           docker exec hazarot-smoke sh -c '! command -v node && ! command -v npm && ! command -v esbuild'
+      - name: Smoke test Compose setup, persistent volume and HTTPS configuration
+        env:
+          HAZAROT_IMAGE: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
+          HAZAROT_PORT: "19091"
+        run: |
+          docker compose -p hazarot-ci run --rm --user "$(id -u):$(id -g)" setup --origin http://localhost:19091
+          docker compose -p hazarot-ci up -d --no-build hazarot
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19091/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:19091/health | jq -e '.ok and .creatorConfigured'
+          node scripts/compose-smoke.ts create
+          docker compose -p hazarot-ci restart hazarot
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19091/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:19091/health | jq -e '.ok and .creatorConfigured'
+          node scripts/compose-smoke.ts verify
+          docker run --rm -e HAZAROT_DOMAIN=localhost -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+      - name: Promote checked multiarch image to latest
+        run: docker buildx imagetools create --tag ghcr.io/barakplasma/hazarot:latest ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
       - name: Container logs and cleanup
         if: always()
         run: |
+          docker compose -p hazarot-ci down -v 2>/dev/null || true
           docker logs hazarot-smoke 2>/dev/null || true
           docker rm -f hazarot-smoke 2>/dev/null || true
+
+  vm-bundles:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build:runtime
+      - name: Package both Linux architectures
+        run: |
+          mkdir -p "$RUNNER_TEMP/celld"
+          for architecture in amd64 arm64; do
+            case "$architecture" in amd64) target=x86_64 ;; arm64) target=aarch64 ;; esac
+            curl -fsSL "https://github.com/denoland/celld/releases/download/v0.6.3/celld-$target-unknown-linux-gnu.gz" -o "$RUNNER_TEMP/celld/$architecture.gz"
+            gzip -dc "$RUNNER_TEMP/celld/$architecture.gz" > "$RUNNER_TEMP/celld/$architecture"
+            npm run package:vm -- --arch "$architecture" --celld "$RUNNER_TEMP/celld/$architecture"
+          done
+          (cd .build/vm && sha256sum *.tar.gz > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hazarot-vm-bundles
+          path: |
+            .build/vm/*.tar.gz
+            .build/vm/SHA256SUMS

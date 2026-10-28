@@ -1,0 +1,16 @@
+# Optional self-hosted TLS. Point the hostname at this host and allow ports 80/443.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      HAZAROT_DOMAIN: ${HAZAROT_DOMAIN:?Run setup with your public HTTPS origin first}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [hazarot]
+volumes:
+  caddy-data:
+  caddy-config:

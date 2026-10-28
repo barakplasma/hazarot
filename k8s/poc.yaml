@@ -1,3 +1,4 @@
+# LEGACY: use deploy/helm/hazarot and docs/hosting.md for maintained installs.
 # Single-node proof of concept using celld dev's persistent local store.
 # Not a production fleet or high-availability configuration.
 apiVersion: v1

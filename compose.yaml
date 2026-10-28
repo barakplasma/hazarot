@@ -1,0 +1,40 @@
+# One app, one writer, one persistent volume. No database service is required.
+services:
+  hazarot:
+    image: ${HAZAROT_IMAGE:-ghcr.io/barakplasma/hazarot:latest}
+    build: .
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    ports:
+      - "${HAZAROT_BIND_ADDRESS:-127.0.0.1}:${HAZAROT_PORT:-9876}:9876"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "9876"
+      CREATOR_TOKEN_SHA256: ${CREATOR_TOKEN_SHA256:-}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      MODEL_NAME: ${MODEL_NAME:-}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_API_KEY_FILE: ${MODEL_API_KEY_FILE:-}
+      POSTHOG_ENABLED: ${POSTHOG_ENABLED:-false}
+      AI_DAILY_CALLS: ${AI_DAILY_CALLS:-100}
+      AI_ROOM_CALLS: ${AI_ROOM_CALLS:-20}
+      AI_MINUTE_CALLS: ${AI_MINUTE_CALLS:-6}
+      AI_CONCURRENT_CALLS: ${AI_CONCURRENT_CALLS:-2}
+    volumes:
+      - data:/app/.celld
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  setup:
+    image: node:24-alpine
+    profiles: [tools]
+    working_dir: /setup
+    entrypoint: [node, /tool/setup.ts]
+    volumes:
+      - ./scripts/setup.ts:/tool/setup.ts:ro
+      - .:/setup
+volumes:
+  data:

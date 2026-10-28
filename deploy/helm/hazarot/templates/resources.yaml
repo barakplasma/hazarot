@@ -1,0 +1,133 @@
+{{- $name := .Release.Name -}}
+{{- $hash := required "Run setup.ts, then pass --set-file creatorTokenHash=hazarot-creator.sha256" .Values.creatorTokenHash | trim -}}
+{{- if not (regexMatch "^[a-f0-9]{64}$" $hash) -}}
+{{- fail "creatorTokenHash must be a SHA-256 hex digest, not an admin token" -}}
+{{- end -}}
+{{- if not .Values.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-data
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ $name | quote }}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: hazarot, app.kubernetes.io/instance: {{ $name | quote }}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: hazarot
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          ports: [{name: http, containerPort: 9876}]
+          env:
+            - {name: HOST, value: "0.0.0.0"}
+            - {name: PORT, value: "9876"}
+            - {name: CREATOR_TOKEN_SHA256, value: {{ $hash | quote }}}
+            - {name: MODEL_BASE_URL, value: {{ .Values.inference.baseUrl | quote }}}
+            - {name: MODEL_NAME, value: {{ .Values.inference.model | quote }}}
+            - {name: POSTHOG_ENABLED, value: {{ .Values.analytics.enabled | quote }}}
+            - {name: AI_DAILY_CALLS, value: {{ .Values.limits.dailyCalls | quote }}}
+            - {name: AI_ROOM_CALLS, value: {{ .Values.limits.roomCalls | quote }}}
+            - {name: AI_MINUTE_CALLS, value: {{ .Values.limits.minuteCalls | quote }}}
+            - {name: AI_CONCURRENT_CALLS, value: {{ .Values.limits.concurrentCalls | quote }}}
+            {{- with .Values.inference.existingSecret }}
+            - name: MODEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: {{ $.Values.inference.secretKey | quote }}
+            {{- end }}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+          volumeMounts: [{name: data, mountPath: /app/.celld}]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" $name) .Values.persistence.existingClaim }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  type: {{ .Values.service.type }}
+  selector: {app.kubernetes.io/instance: {{ $name | quote }}}
+  ports: [{name: http, port: {{ .Values.service.port }}, targetPort: http}]
+{{- if .Values.ingress.enabled }}
+{{- $host := required "ingress.host is required when enabling ingress" .Values.ingress.host }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tlsSecretName }}
+  tls:
+    - hosts: [{{ $host | quote }}]
+      secretName: {{ . | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port: {name: http}
+{{- end }}

@@ -1,0 +1,3 @@
+{$HAZAROT_DOMAIN} {
+    reverse_proxy hazarot:9876
+}

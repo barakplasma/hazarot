@@ -14,7 +14,10 @@ shared-admin scheme, not mTLS or per-user authentication.
 The browser sends the token only in the Authorization header of `POST /api/runs`.
 The server stores only `CREATOR_TOKEN_SHA256`, a lowercase hex SHA-256 digest of a
 32-byte random base64url token. Missing or invalid configuration denies creation.
-Use `node scripts/issue-admin.mjs` to write a private setup file and print only its digest.
+For a full installation, `node scripts/setup.ts --origin https://your-host.example`
+writes private configuration, the admin link, and a separate digest file. Docker
+can run this setup tool without installing Node on the host; see [hosting](hosting.md).
+The older `node scripts/issue-admin.mjs` remains available for issuing just a link.
 Rotate by issuing another token and deploying its digest; previous browser tokens
 stop working. No certificate, signature challenge, or passkey implementation remains.
 

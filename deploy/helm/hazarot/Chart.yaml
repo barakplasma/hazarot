@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hazarot
+description: Single-instance celld team rehearsal simulator
+version: 0.2.0
+appVersion: "0.2.0"
+type: application

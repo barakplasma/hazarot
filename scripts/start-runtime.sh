@@ -16,6 +16,12 @@ write_var() {
   escaped_value=$(printf '%s' "$var_value" | sed 's/\\/\\\\/g;s/"/\\"/g')
   printf '%s="%s"\n' "$var_name" "$escaped_value" >> "$vars_tmp"
 }
+# Docker/Kubernetes mounted secret files are optional. Never echo their values.
+if [ -n "${MODEL_API_KEY_FILE:-}" ]; then
+  if [ -n "${MODEL_API_KEY:-}" ]; then echo "Set only one of MODEL_API_KEY and MODEL_API_KEY_FILE" >&2; exit 1; fi
+  if [ ! -s "$MODEL_API_KEY_FILE" ]; then echo "MODEL_API_KEY_FILE must name a nonempty file" >&2; exit 1; fi
+  MODEL_API_KEY=$(cat "$MODEL_API_KEY_FILE")
+fi
 if [ -n "${MODEL_BASE_URL:-}" ]; then write_var MODEL_BASE_URL "$MODEL_BASE_URL"; fi
 if [ -n "${MODEL_NAME:-}" ]; then write_var MODEL_NAME "$MODEL_NAME"; fi
 if [ -n "${MODEL_API_KEY:-}" ]; then write_var MODEL_API_KEY "$MODEL_API_KEY"; fi

@@ -7,17 +7,21 @@ import { makeCreator, creation } from './creator-fixture.mjs';
 const app = resolve(".build/runtime"), port = 9989;
 const base = `http://127.0.0.1:${port}`, creator = makeCreator(base);
 const binary = process.env.CELLD_BIN || (existsSync(".tools/bin/celld") ? resolve(".tools/bin/celld") : execFileSync("/bin/sh", ["-c", "command -v celld"], { encoding: "utf8" }).trim());
+const secretPath = resolve(".build/runtime-model-key");
+writeFileSync(secretPath,"fixture-key-not-a-credential\n",{mode:0o600});
 const log = createWriteStream(".build/runtime-smoke.log");
 const child = spawn("/bin/sh", ["scripts/start-runtime.sh"], {
   detached: true, stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, ...creator.env, APP_DIR: app, CELLD_BIN: binary, HOST: "127.0.0.1", PORT: String(port),
     PATH: "/usr/bin:/bin", CELLD_ESBUILD: "/intentionally-missing-esbuild",
-    MODEL_BASE_URL: "http://127.0.0.1:9/v1", MODEL_NAME: "smoke-model", MODEL_API_KEY: "fixture-key-not-a-credential" },
+    MODEL_BASE_URL: "http://127.0.0.1:9/v1", MODEL_NAME: "smoke-model", MODEL_API_KEY: "", MODEL_API_KEY_FILE: secretPath },
 });
 child.stdout.pipe(log, { end: false }); child.stderr.pipe(log, { end: false });
 try {
   const deadline = Date.now() + 12000;
   for (;;) { try { if ((await fetch(base + "/health")).ok) break; } catch {} if (Date.now() > deadline) throw new Error("Runtime did not start"); await new Promise(r => setTimeout(r, 100)); }
+  const {readFileSync}=await import("node:fs");
+  assert(readFileSync(app+"/.dev.vars","utf8").includes('MODEL_API_KEY="fixture-key-not-a-credential"'));
   const catalog = await (await fetch(base + "/api/scenarios")).json();
   assert.equal(catalog.coachMode, "model"); assert(catalog.scenarios.some(s => s.id === "wedding-traffic"));
   const root = await fetch(base + "/"); assert.equal(root.status, 200);

@@ -1,0 +1,10 @@
+Hazarot runs as one celld writer with persistent storage.
+
+Local access:
+  kubectl -n {{ .Release.Namespace }} port-forward service/{{ .Release.Name }} 9876:{{ .Values.service.port }}
+
+Open the URL in your private hazarot-admin.json to enable creating rooms.
+Check /health for creatorConfigured:true. No inference is required for authored play.
+
+Your PVC is retained on uninstall. Take an offline backup before image upgrades.
+Do not scale replicas or share the data directory between running instances.

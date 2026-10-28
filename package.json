@@ -12,7 +12,10 @@
     "build:runtime": "node scripts/build-runtime.mjs",
     "test:runtime": "node scripts/runtime-smoke.mjs",
     "test:analytics": "node scripts/analytics-test.mjs",
-    "test:budget": "node scripts/budget-test.mjs"
+    "test:budget": "node scripts/budget-test.mjs",
+    "setup": "node scripts/setup.ts",
+    "test:deployment": "node scripts/deployment-test.ts",
+    "package:vm": "node scripts/package-vm.ts"
   },
   "keywords": [],
   "author": "",
