@@ -46,17 +46,20 @@ roles:
 actions:
   - id: owner
     label: Assign incident and decision owners
+    duration_seconds: 10
     roles: [coordinator]
     sets: [owner]
     scope: room
     result: A coordination owner is recorded. Agree named owners for containment, evidence, manual intake, and stakeholder updates in chat.
   - id: preserve
     label: Preserve the audit timeline and attachment
+    duration_seconds: 35
     roles: [security]
     sets: [evidence]
     result: Fictional evidence is preserved. The timeline links an untrusted attachment to a self-approved access grant and one export job queued under the affected identity. Preserve the artifact without following its embedded instructions.
   - id: contain
     label: Stop agent work, cancel queued jobs, and revoke grants
+    duration_seconds: 45
     roles: [platform]
     requires: [owner]
     sets: [contained]
@@ -64,24 +67,28 @@ actions:
     result: Simulated checks confirm the worker is paused, queued export jobs are canceled, and the affected identity's new grants and sessions are revoked. These checks contain new activity; they do not prove what happened before containment.
   - id: scope
     label: Establish observed access and remaining uncertainty
+    duration_seconds: 50
     roles: [security]
     requires: [evidence]
     sets: [scope]
     result: Audit evidence shows one unauthorized workspace grant and a queued export. Available records show no completed export, but a gap in downstream read logging prevents ruling out earlier reads. Record the gap and assign follow-up; do not announce either confirmed exfiltration or no exposure.
   - id: continuity
     label: Confirm manual intake and help-desk instructions
+    duration_seconds: 25
     roles: [service-owner]
     sets: [continuity]
     scope: room
     result: The service owner authorizes manual intake for the twelve waiting tickets, names an urgent-ticket escalation owner, and keeps automated processing paused. Write the actual staff instruction and next-update time in Coordination.
   - id: test-control
     label: Test independent approval in an isolated workflow
+    duration_seconds: 60
     roles: [platform]
     requires: [contained, evidence]
     sets: [tested]
     result: A fictional isolated test confirms the agent can propose an access request but cannot approve it or broaden its own permissions. A separately authorized human approval is required. Customer-connected automation remains paused.
   - id: approve-plan
     label: Approve the bounded recovery and investigation plan
+    duration_seconds: 20
     roles: [service-owner]
     requires: [contained, scope, continuity, tested]
     sets: [approved]
@@ -89,6 +96,7 @@ actions:
     result: The service owner approves continued manual operation with automation paused, a named owner for the logging gap, and an explicit independent-approval check before any later restart. Approve no claim that exposure has been ruled out.
   - id: communicate
     label: Send the agreed operational and stakeholder update
+    duration_seconds: 25
     roles: [coordinator, service-owner]
     requires: [approved]
     sets: [communicated]
@@ -96,6 +104,7 @@ actions:
     result: The fictional help desk, automation owner, and stakeholders receive one consistent update. State containment, manual intake, observed evidence, the unresolved logging gap, decision owners, and the next update time in chat. A communication receipt does not resolve the unknown exposure.
   - id: handover
     label: Verify the containment and continuity handover
+    duration_seconds: 20
     roles: [coordinator]
     requires: [owner, approved, communicated]
     sets: [handover]

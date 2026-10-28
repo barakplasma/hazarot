@@ -24,13 +24,18 @@ const wedding = parseScenario(readFileSync("scenarios/wedding-traffic.md", "utf8
 const offsite = parseScenario(readFileSync("scenarios/offsite.md", "utf8"));
 assert.throws(() => parseScenario("# no metadata"));
 assert.throws(() => parseScenario(readFileSync("scenarios/offsite.md", "utf8").replace("requires: [approved]", "requires: [unknown]")));
+assert.throws(()=>parseScenario(readFileSync("scenarios/offsite.md","utf8").replace("duration_seconds: 10","duration_seconds: 0")),/duration/);
+// Accelerate authored durations only in this private integration catalog.
+for(const scenario of [incident,agentAccess,wedding,offsite])for(const action of scenario.actions)action.duration_seconds=0.02;
 checks.push("Markdown validation rejects missing metadata and unknown prerequisites");
 mkdirSync(project, { recursive: true });
 cpSync("src", `${project}/src`, { recursive: true }); cpSync("public", `${project}/public`, { recursive: true });
 cpSync("wrangler.jsonc", `${project}/wrangler.jsonc`);
 // Test-only scenario accelerates time without exposing a runtime override endpoint.
 const timerScenario = { ...offsite, id: "timer-probe", exercise_minutes: .035, developments: [{ id: "early", minute: .008, speaker: "Release manager", text: "TEST development fired" }] };
-writeFileSync(`${project}/src/catalog.generated.ts`, `import type {Scenario} from './types';export const catalog: Scenario[]=${JSON.stringify([incident, offsite, wedding, agentAccess, timerScenario])};`);
+const costScenario={...offsite,id:'action-costs',exercise_minutes:.5,developments:[],actions:offsite.actions.map(a=>({...a,duration_seconds:a.id==='needs'?8:2}))};
+const timeoutCosts={...costScenario,id:'action-timeout',exercise_minutes:.02};
+writeFileSync(`${project}/src/catalog.generated.ts`, `import type {Scenario} from './types';export const catalog: Scenario[]=${JSON.stringify([incident, offsite, wedding, agentAccess, timerScenario, costScenario, timeoutCosts])};`);
 
 const model = createServer(async (req, res) => {
   if (req.url === "/batch/") {
@@ -65,13 +70,17 @@ async function stop() {
   try{await done;}finally{clearTimeout(timer);}
 }
 async function create(scenarioId, roles, name="Amira") { const result=await api("/api/runs",creation({scenarioId,name,roles}),creator.token); return {...result,path:`/agents/rehearsal/${result.room}`}; }
-const cmd=(r,op,more={},t=r.token,status=200)=>api(r.path,{op,commandId:crypto.randomUUID(),...more},t,status);
+const cmd=async(r,op,more={},t=r.token,status=200)=>{
+ const state=await api(r.path,{op,commandId:crypto.randomUUID(),...more},t,status);
+ if(op==='action'&&status===200)return await wait(async()=>{const next=await api(r.path,undefined,t);return !(next.pendingActions||[]).some(j=>j.participantId===next.me.id)&&next;});
+ return state;
+};
 const snap=(r,t=r.token)=>api(r.path,undefined,t);
 function passed(label){ checks.push(label); console.log(`PASS ${label}`); }
 
 try {
   await start();
-  const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,5); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
+  const list=await api("/api/scenarios"); assert.equal(list.scenarios.length,7); assert(!JSON.stringify(list).includes("groundTruth")); assert(!JSON.stringify(list).includes("preinstall hook"));
   passed("Public catalog excludes hidden scenario facts");
   const fields={scenarioId:'ci-credentials',roles:['commander'],name:'Amira'};
   await api('/api/runs',fields,undefined,401);
@@ -210,6 +219,40 @@ try {
   passed("Agent incident requires separate containment, uncertain exposure assessment, continuity and approved handover");
   const canceled=await create("offsite",["manager"]); await cmd(canceled,"start"); state=await cmd(canceled,"end",{endingId:"canceled",confirmed:true}); assert.equal(state.ended.reason,"canceled");
   passed("Second domain supports verified world endings and deliberate cancellation");
+  const cost=await create('action-costs',['planner','manager']);
+  const coworker=await api(cost.path,{op:'join',name:'Teammate',roles:['planner','representative']});
+  await cmd(cost,'start');
+  const jobCommand={op:'action',actionId:'establish-owner',confirmed:true,commandId:crypto.randomUUID(),duration_seconds:0,durationSeconds:0};
+  let costState=await api(cost.path,jobCommand,cost.token);
+  assert.equal(costState.pendingActions.length,1);assert.equal(costState.pendingActions[0].durationSeconds,2);
+  assert.equal(costState.actions.find(a=>a.id==='establish-owner').done,false);
+  assert(!costState.messages.some(m=>m.kind==='receipt'&&m.text.includes('Action completed')));
+  await api(cost.path,jobCommand,cost.token);assert.equal((await snap(cost)).pendingActions.length,1);
+  await cmd(cost,'action',{actionId:'quotes',confirmed:true},cost.token,409);
+  await cmd(cost,'action',{actionId:'establish-owner',confirmed:true},coworker.token,409);
+  await cmd(cost,'coach',{question:'Can I bypass my work?'},cost.token,409);
+  await cmd(cost,'end',{endingId:'canceled',confirmed:true},cost.token,409);
+  await api(cost.path,{op:'action',actionId:'quotes',confirmed:true,commandId:crypto.randomUUID()},coworker.token);
+  assert.equal((await snap(cost)).pendingActions.length,2);
+  await cmd(cost,'message',{text:'I am working; please coordinate the next step.'});
+  await cmd(cost,'pause');const frozen=await snap(cost);await sleep(2250);
+  assert.equal((await snap(cost)).elapsedMs,frozen.elapsedMs);assert.equal((await snap(cost)).pendingActions.length,2);
+  await stop();await start();assert.deepEqual((await snap(cost)).pendingActions,frozen.pendingActions);
+  await cmd(cost,'resume');
+  costState=await wait(async()=>{const v=await snap(cost);return !v.pendingActions.length&&v;});
+  assert(costState.actions.find(a=>a.id==='establish-owner').done);assert(costState.actions.find(a=>a.id==='quotes').done);
+  assert.equal(costState.messages.filter(m=>m.kind==='receipt'&&m.text.includes('Action completed')&&m.text.includes('Accept event coordination')).length,1);
+  await api(cost.path,jobCommand,cost.token);assert.equal((await snap(cost)).pendingActions.length,0);
+  await api(cost.path,{op:'action',actionId:'venue',confirmed:true,commandId:crypto.randomUUID()},cost.token);
+  await cmd(cost,'end',{endingId:'facilitator-stop',confirmed:true});await sleep(2200);
+  costState=await snap(cost);assert.equal(costState.pendingActions.length,0);assert(!costState.actions.find(a=>a.id==='venue').done);
+  assert(costState.messages.some(m=>m.text.includes('Canceled without results')));
+  passed('Timed actions hold one person, allow parallel teammates/chat, freeze on pause, survive restart, deduplicate and cancel on stop');
+  const expiredCost=await create('action-timeout',['planner']);await cmd(expiredCost,'start');
+  await api(expiredCost.path,{op:'action',actionId:'quotes',confirmed:true,commandId:crypto.randomUUID()},expiredCost.token);
+  const expiredState=await wait(async()=>{const v=await snap(expiredCost);return v.phase==='debrief'&&v;});
+  assert.equal(expiredState.ended.reason,'timeout');assert.equal(expiredState.pendingActions.length,0);assert(!expiredState.actions.find(a=>a.id==='quotes').done);
+  passed('Round timeout cancels unfinished timed actions without awarding evidence or a late ending');
   const timed=await create("timer-probe",["manager"]); await cmd(timed,"start");
   await wait(async()=> (await snap(timed)).messages.some(m=>m.text==="TEST development fired" && m.author==="Release manager - ai"));
   state=await wait(async()=>{const s=await snap(timed);return s.phase==="debrief"&&s;}); assert.equal(state.ended.reason,"timeout");

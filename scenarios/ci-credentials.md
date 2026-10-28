@@ -46,33 +46,39 @@ roles:
 actions:
   - id: establish-owner
     label: Accept incident coordination
+    duration_seconds: 10
     roles: [commander]
     sets: [owner]
     scope: room
     result: Incident coordination has an explicit owner. Ask investigators to acknowledge their assignments in the room.
   - id: audit
     label: Inspect token audit records
+    duration_seconds: 40
     roles: [security]
     sets: [audit]
     result: Audit evidence shows the publishing token was used from an unfamiliar address. Its scope includes package publishing. There is no evidence in this record of customer database access.
   - id: inspect-runner
     label: Inspect runner install log
+    duration_seconds: 35
     roles: [platform]
     sets: [runner]
     result: The install log shows an unexpected dependency preinstall hook reading CI environment variables. The affected runner must not be trusted for recovery builds.
   - id: collect-impact
     label: Confirm user impact
+    duration_seconds: 30
     roles: [helpdesk]
     sets: [impact]
     result: Two developers confirm publishing errors starting after the dependency update. Customer checkout remains available; release delivery is delayed.
   - id: approve-pause
     label: Approve pausing shared runners
+    duration_seconds: 15
     roles: [commander]
     sets: [approved]
     scope: room
     result: Pausing shared runners is approved. This delays releases; assign an owner and communicate that impact.
   - id: isolate
     label: Pause and isolate the affected runner
+    duration_seconds: 30
     roles: [platform]
     requires: [approved]
     sets: [isolated]
@@ -80,6 +86,7 @@ actions:
     result: The affected runner is paused and isolated. Existing credentials still require revocation; isolation alone does not close that exposure.
   - id: revoke
     label: Revoke the exposed publishing token
+    duration_seconds: 30
     roles: [security]
     requires: [audit]
     sets: [revoked]
@@ -87,6 +94,7 @@ actions:
     result: The exposed token is revoked. Audit records and runner evidence are retained for investigation.
   - id: rebuild
     label: Verify a clean rebuild
+    duration_seconds: 60
     roles: [platform]
     requires: [isolated, revoked, runner]
     sets: [verified]
@@ -94,6 +102,7 @@ actions:
     result: A rebuilt runner with pinned clean dependencies and a replacement scoped credential passes a test build and publish. The old runner is retained offline as evidence.
   - id: status-update
     label: Publish an agreed stakeholder update
+    duration_seconds: 30
     roles: [commander, helpdesk]
     requires: [owner]
     sets: [status]

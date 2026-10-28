@@ -47,6 +47,8 @@ export function parseScenario(markdown: string): Scenario {
     if (item.requires?.some(f => !flags.has(f))) throw new Error(`Unknown prerequisite in ${item.id}`);
   }
   for (const action of s.actions) {
+    if (action.duration_seconds === undefined) action.duration_seconds = 30;
+    if (!Number.isFinite(action.duration_seconds) || action.duration_seconds <= 0 || action.duration_seconds > 3600) throw new Error(`Invalid action duration in ${action.id}: use duration_seconds between 0 and 3600 (exclusive of zero)`);
     if (!action.result || !Array.isArray(action.sets)) throw new Error(`Invalid action ${action.id}`);
     if (action.end && !s.endings.some(e => e.id === action.end && e.kind !== "declaration")) throw new Error(`Invalid action ending ${action.id}`);
   }

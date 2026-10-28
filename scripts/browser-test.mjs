@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { chromium } from "@playwright/test";
-import { mkdirSync, mkdtempSync, cpSync, createWriteStream, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, cpSync, createWriteStream, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { makeCreator } from './creator-fixture.mjs';
 
@@ -18,6 +18,9 @@ await new Promise(r=>fixture.listen(0,"127.0.0.1",r));
 const project=mkdtempSync(resolve(".build/browser-"));
 const creator=makeCreator('http://127.0.0.1:9988');
 for(const dir of ["src","public"]) cpSync(dir,`${project}/${dir}`,{recursive:true});
+// Short exercise costs in the private browser fixture only; production stays authored.
+const catalogPath=`${project}/src/catalog.generated.ts`;
+writeFileSync(catalogPath,readFileSync(catalogPath,'utf8').replace(/"duration_seconds": [0-9.]+/g,'"duration_seconds": 2'));
 cpSync("wrangler.jsonc",`${project}/wrangler.jsonc`);
 writeFileSync(`${project}/.dev.vars`,creator.vars+`AI_MINUTE_CALLS=200\nMODEL_BASE_URL=http://127.0.0.1:${fixture.address().port}/v1\nMODEL_NAME=fixture\n`);
 const child=spawn(binary,["dev",project,"--host","127.0.0.1","--port","9988","--no-watch","--logs"],{detached:true,env:{...process.env,PATH:`${process.cwd()}/node_modules/.bin:${process.env.PATH}`},stdio:["ignore","pipe","pipe"]});
@@ -88,8 +91,13 @@ try{
   await page.getByRole("heading",{name:"Token investigation",exact:true}).waitFor();
   await peer.getByRole("button",{name:"Token investigation",exact:true}).click();
   await peer.getByRole("button",{name:"Inspect token audit records",exact:true}).click();await peer.getByRole("button",{name:"Confirm",exact:true}).click();
+  await peer.getByText(/You: Inspect token audit records/).waitFor();
+  assert(await peer.getByRole("button",{name:"Revoke the exposed publishing token",exact:true}).isEnabled()===false);
+  await peer.locator('#message').fill('Investigation is running; I will report when it completes.');
+  await peer.getByRole('button',{name:'Send',exact:true}).click();
+  await page.getByText('Investigation is running; I will report when it completes.',{exact:true}).waitFor();
   await page.getByText(/Audit evidence shows the publishing token/).waitFor();
-  pass("Work threads and confirmed role-authorized action receipts synchronize");
+  pass("Timed actions reserve the actor while chat remains usable and completed receipts synchronize over WebSocket");
   await page.getByRole("button",{name:/Amira · role & coaching/}).click();
   await page.getByRole("button",{name:"Ask coach",exact:true}).click();await page.locator("#modal-input").fill("How do I ask for an update without taking over?");await page.getByRole("button",{name:"Confirm",exact:true}).click();
   await page.getByText(/Your coach is preparing a reply/).waitFor();

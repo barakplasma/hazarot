@@ -6,6 +6,7 @@ const make = (tag, text, className) => { const e = document.createElement(tag); 
 const params = new URLSearchParams(location.search);
 let room = params.get("room"), invite = params.get("invite"), session = room ? JSON.parse(localStorage.getItem(`rehearsal:${room}`) || "null") : null;
 let scenarios = [], selected, snapshot, selectedThread = "coordination", socket, refreshPromise, modalAction;
+let snapshotReceivedAt = Date.now();
 let lastRender = "", reconnectAttempts = 0, refreshingAgain = false, snapshotChunks;
 const pendingCommands = new Map();
 let reconnectTimer, resyncRequested = false;
@@ -64,7 +65,7 @@ function applySnapshot(next) {
     }
     next = { ...next, messages: [...snapshot.messages, ...next.messages] };
   }
-  resyncRequested = false; snapshot = next; render();
+  resyncRequested = false; snapshot = next; snapshotReceivedAt = Date.now(); render();
 }
 function connect() {
   clearTimeout(reconnectTimer);
@@ -170,17 +171,32 @@ function nav(thread) {
   if (thread.kind === "personal") b.append(make("small", thread.owner === snapshot.me.id ? "Your role and coaching" : "Private by convention"));
   return b;
 }
+function actionTime(job) {
+  const elapsed = snapshot.elapsedMs + (snapshot.phase === "active" ? Date.now() - snapshotReceivedAt : 0);
+  const seconds = Math.ceil(Math.max(0, job.completesElapsedMs - elapsed) / 1000);
+  return seconds ? `${seconds}s${snapshot.phase === "paused" ? " · paused" : ""}` : "Completing…";
+}
+function updateActionClocks() {
+  if (!snapshot) return;
+  for (const e of document.querySelectorAll("[data-action-countdown]")) {
+    const job = (snapshot.pendingActions || []).find(j => j.participantId === e.dataset.actionCountdown);
+    e.textContent = job ? `${job.label} · ${actionTime(job)}` : "";
+  }
+}
 function updateActivity() {
   const status = $("activity-status"); if (!status || !snapshot) return;
   const activities = (snapshot.activities || []).filter(a => a.expiresAt > Date.now());
-  const labels = activities.map(a => `${a.label} (${Math.floor((Date.now() - a.startedAt) / 1000)}s)`);
+  const work = snapshot.pendingActions || [];
+  updateActionClocks();
+  const labels = work.map(job => `${job.participantId === snapshot.me.id ? "You" : snapshot.participants.find(p => p.id === job.participantId)?.name}: ${job.label} (${actionTime(job)})`);
+  labels.push(...activities.map(a => `${a.label} (${Math.floor((Date.now() - a.startedAt) / 1000)}s)`));
   const pending = [...pendingCommands.values()];
   if (pending.length) labels.unshift(pending.some(p => p.operation === "message") ? "Saving your message…" : "Saving your request…");
   if (socket?.readyState !== WebSocket.OPEN) labels.unshift("Connection interrupted — reconnecting. Your draft is kept.");
   const idle = snapshot.phase === "active" ? "Ready. AI colleagues reply when @mentioned; Ask coach requests guidance." : snapshot.phase === "paused" ? "Round paused. The exercise clock is stopped." : snapshot.phase === "debrief" ? "Round finished. Discuss the debrief or replay." : "Waiting for the facilitator to start the round.";
   status.textContent = labels.join(" · ") || idle;
   status.classList.toggle("busy", Boolean(labels.length));
-  $("ask-coach").disabled = snapshot.phase === "lobby" || activities.some(a => a.participant === snapshot.me.id);
+  $("ask-coach").disabled = snapshot.phase === "lobby" || work.some(j => j.participantId === snapshot.me.id) || activities.some(a => a.participant === snapshot.me.id);
 }
 function updateTimer() {
   updateActivity();
@@ -206,6 +222,7 @@ function render() {
   $("new-thread").disabled = s.phase === "debrief";
   $("participants").replaceChildren(...s.participants.map(p => {
     const row = make("div", undefined, "participant"), names = make("div"); names.append(make("strong", `${p.name}${p.id === s.me.id ? " (you)" : ""}`), make("small", roleNames(p.roles)));
+    const work = make("small", "", "participant-work"); work.dataset.actionCountdown = p.id; names.append(work);
     row.append(make("span", p.name.slice(0, 1).toUpperCase(), "avatar"), names); return row;
   }));
   $("invite").hidden = !s.me.host; $("invite").disabled = s.phase !== "lobby";
@@ -241,14 +258,23 @@ function render() {
   $("role-cards").replaceChildren(...s.roleCards.map(r => { const card = make("div", undefined, "role-card"); card.append(make("h3", r.name), make("p", r.responsibility), make("p", `Authority: ${r.authority}`)); return card; }));
   $("coach-mode").textContent = s.coachMode === "model" ? "AI coaching · internal OpenAI-compatible endpoint" : "Authored coaching · no model endpoint configured";
   updateActivity();
+  const ownWork = (s.pendingActions || []).find(job => job.participantId === s.me.id);
   $("actions").replaceChildren(...s.actions.filter(a => a.allowed).map(a => {
-    const b = button(a.label, () => confirmDialog(a.label, "This commits a fictional action under your role. Review any approvals with teammates first. The result will be recorded in this thread or Coordination.", () => command("action", { actionId: a.id, confirmed: true, thread: selectedThread })), a.done ? "done" : "");
-    b.disabled = s.phase !== "active" || !a.ready || a.done;
-    if (a.done) b.append(make("small", "Recorded")); else if (!a.ready) b.append(make("small", "Needs evidence or approval")); return b;
+    const b = button(a.label, () => confirmDialog(a.label, `This occupies you for ${a.durationSeconds} exercise seconds. You may chat, but cannot start another action, ask the coach, or declare an ending until it completes. Pausing freezes the countdown. Results are recorded only at completion. Review approvals with teammates first.`, () => command("action", { actionId: a.id, confirmed: true, thread: selectedThread })), a.done ? "done" : "");
+    b.setAttribute("aria-label", a.label); b.dataset.actionId = a.id;
+    b.disabled = s.phase !== "active" || !a.ready || a.done || Boolean(ownWork) || a.inProgress;
+    const detail = make("small"); detail.id = `action-detail-${a.id}`; b.setAttribute("aria-describedby", detail.id);
+    if (a.done) detail.textContent = "Recorded";
+    else if (a.inProgress) {
+      const job = (s.pendingActions || []).find(job => job.actionId === a.id);
+      if (job) { detail.dataset.actionCountdown = job.participantId; detail.textContent = `${job.label} · ${actionTime(job)}`; }
+    } else detail.textContent = `${a.durationSeconds}s · ${ownWork ? "Finish your current action first" : !a.ready ? "Needs evidence or approval" : "Reserves your time"}`;
+    b.append(detail); return b;
   }));
   $("endings").replaceChildren(...s.endings.map(e => {
-    const b = button(e.label, () => endDialog(e.id, e.label), "secondary"); b.disabled = !["active", "paused"].includes(s.phase); return b;
+    const b = button(e.label, () => endDialog(e.id, e.label), "secondary"); b.disabled = !["active", "paused"].includes(s.phase) || Boolean(ownWork); return b;
   }));
+  updateActionClocks();
   if (!s.endings.length) $("endings").append(make("p", "Your role cannot declare an ending. Coordinate with the decision owner.", "small muted"));
 }
 

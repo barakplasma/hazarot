@@ -64,6 +64,7 @@ export const catalog: Scenario[] = [
       {
         "id": "owner",
         "label": "Assign incident and decision owners",
+        "duration_seconds": 10,
         "roles": [
           "coordinator"
         ],
@@ -76,6 +77,7 @@ export const catalog: Scenario[] = [
       {
         "id": "preserve",
         "label": "Preserve the audit timeline and attachment",
+        "duration_seconds": 35,
         "roles": [
           "security"
         ],
@@ -87,6 +89,7 @@ export const catalog: Scenario[] = [
       {
         "id": "contain",
         "label": "Stop agent work, cancel queued jobs, and revoke grants",
+        "duration_seconds": 45,
         "roles": [
           "platform"
         ],
@@ -102,6 +105,7 @@ export const catalog: Scenario[] = [
       {
         "id": "scope",
         "label": "Establish observed access and remaining uncertainty",
+        "duration_seconds": 50,
         "roles": [
           "security"
         ],
@@ -116,6 +120,7 @@ export const catalog: Scenario[] = [
       {
         "id": "continuity",
         "label": "Confirm manual intake and help-desk instructions",
+        "duration_seconds": 25,
         "roles": [
           "service-owner"
         ],
@@ -128,6 +133,7 @@ export const catalog: Scenario[] = [
       {
         "id": "test-control",
         "label": "Test independent approval in an isolated workflow",
+        "duration_seconds": 60,
         "roles": [
           "platform"
         ],
@@ -143,6 +149,7 @@ export const catalog: Scenario[] = [
       {
         "id": "approve-plan",
         "label": "Approve the bounded recovery and investigation plan",
+        "duration_seconds": 20,
         "roles": [
           "service-owner"
         ],
@@ -161,6 +168,7 @@ export const catalog: Scenario[] = [
       {
         "id": "communicate",
         "label": "Send the agreed operational and stakeholder update",
+        "duration_seconds": 25,
         "roles": [
           "coordinator",
           "service-owner"
@@ -177,6 +185,7 @@ export const catalog: Scenario[] = [
       {
         "id": "handover",
         "label": "Verify the containment and continuity handover",
+        "duration_seconds": 20,
         "roles": [
           "coordinator"
         ],
@@ -353,6 +362,7 @@ export const catalog: Scenario[] = [
       {
         "id": "establish-owner",
         "label": "Accept incident coordination",
+        "duration_seconds": 10,
         "roles": [
           "commander"
         ],
@@ -365,6 +375,7 @@ export const catalog: Scenario[] = [
       {
         "id": "audit",
         "label": "Inspect token audit records",
+        "duration_seconds": 40,
         "roles": [
           "security"
         ],
@@ -376,6 +387,7 @@ export const catalog: Scenario[] = [
       {
         "id": "inspect-runner",
         "label": "Inspect runner install log",
+        "duration_seconds": 35,
         "roles": [
           "platform"
         ],
@@ -387,6 +399,7 @@ export const catalog: Scenario[] = [
       {
         "id": "collect-impact",
         "label": "Confirm user impact",
+        "duration_seconds": 30,
         "roles": [
           "helpdesk"
         ],
@@ -398,6 +411,7 @@ export const catalog: Scenario[] = [
       {
         "id": "approve-pause",
         "label": "Approve pausing shared runners",
+        "duration_seconds": 15,
         "roles": [
           "commander"
         ],
@@ -410,6 +424,7 @@ export const catalog: Scenario[] = [
       {
         "id": "isolate",
         "label": "Pause and isolate the affected runner",
+        "duration_seconds": 30,
         "roles": [
           "platform"
         ],
@@ -425,6 +440,7 @@ export const catalog: Scenario[] = [
       {
         "id": "revoke",
         "label": "Revoke the exposed publishing token",
+        "duration_seconds": 30,
         "roles": [
           "security"
         ],
@@ -440,6 +456,7 @@ export const catalog: Scenario[] = [
       {
         "id": "rebuild",
         "label": "Verify a clean rebuild",
+        "duration_seconds": 60,
         "roles": [
           "platform"
         ],
@@ -457,6 +474,7 @@ export const catalog: Scenario[] = [
       {
         "id": "status-update",
         "label": "Publish an agreed stakeholder update",
+        "duration_seconds": 30,
         "roles": [
           "commander",
           "helpdesk"
@@ -597,6 +615,7 @@ export const catalog: Scenario[] = [
       {
         "id": "establish-owner",
         "label": "Accept event coordination",
+        "duration_seconds": 10,
         "roles": [
           "planner",
           "manager"
@@ -610,6 +629,7 @@ export const catalog: Scenario[] = [
       {
         "id": "needs",
         "label": "Confirm participant transport needs",
+        "duration_seconds": 25,
         "roles": [
           "representative"
         ],
@@ -621,6 +641,7 @@ export const catalog: Scenario[] = [
       {
         "id": "quotes",
         "label": "Request transport options",
+        "duration_seconds": 40,
         "roles": [
           "planner"
         ],
@@ -632,6 +653,7 @@ export const catalog: Scenario[] = [
       {
         "id": "venue",
         "label": "Check the later arrival with the venue",
+        "duration_seconds": 30,
         "roles": [
           "planner"
         ],
@@ -643,6 +665,7 @@ export const catalog: Scenario[] = [
       {
         "id": "approve",
         "label": "Approve the later accessible bus and $400",
+        "duration_seconds": 15,
         "roles": [
           "manager"
         ],
@@ -660,6 +683,7 @@ export const catalog: Scenario[] = [
       {
         "id": "book",
         "label": "Book the later accessible bus",
+        "duration_seconds": 40,
         "roles": [
           "planner"
         ],
@@ -675,6 +699,7 @@ export const catalog: Scenario[] = [
       {
         "id": "communicate",
         "label": "Communicate the confirmed travel plan",
+        "duration_seconds": 20,
         "roles": [
           "representative",
           "planner"
@@ -691,6 +716,7 @@ export const catalog: Scenario[] = [
       {
         "id": "board",
         "label": "Verify everyone has boarded",
+        "duration_seconds": 30,
         "roles": [
           "planner",
           "representative"
@@ -846,6 +872,7 @@ export const catalog: Scenario[] = [
       {
         "id": "owner",
         "label": "Accept wedding coordination",
+        "duration_seconds": 10,
         "roles": [
           "coordinator"
         ],
@@ -858,6 +885,7 @@ export const catalog: Scenario[] = [
       {
         "id": "supplier-status",
         "label": "Confirm the DJ's status and equipment dependency",
+        "duration_seconds": 25,
         "roles": [
           "coordinator"
         ],
@@ -869,6 +897,7 @@ export const catalog: Scenario[] = [
       {
         "id": "guest-impact",
         "label": "Confirm delayed guests and arrival needs",
+        "duration_seconds": 35,
         "roles": [
           "guest-liaison"
         ],
@@ -880,6 +909,7 @@ export const catalog: Scenario[] = [
       {
         "id": "venue-options",
         "label": "Confirm venue and catering options",
+        "duration_seconds": 30,
         "roles": [
           "venue-lead"
         ],
@@ -891,6 +921,7 @@ export const catalog: Scenario[] = [
       {
         "id": "audio-check",
         "label": "Test the backup microphone and playlist setup",
+        "duration_seconds": 45,
         "roles": [
           "venue-lead"
         ],
@@ -902,6 +933,7 @@ export const catalog: Scenario[] = [
       {
         "id": "couple-priorities",
         "label": "Confirm the couple's priorities and acceptable tradeoffs",
+        "duration_seconds": 25,
         "roles": [
           "couple-representative"
         ],
@@ -917,6 +949,7 @@ export const catalog: Scenario[] = [
       {
         "id": "approve-plan",
         "label": "Approve the revised wedding plan",
+        "duration_seconds": 15,
         "roles": [
           "couple-representative"
         ],
@@ -937,6 +970,7 @@ export const catalog: Scenario[] = [
       {
         "id": "notify",
         "label": "Issue the approved guest and supplier update",
+        "duration_seconds": 25,
         "roles": [
           "guest-liaison",
           "coordinator"
@@ -953,6 +987,7 @@ export const catalog: Scenario[] = [
       {
         "id": "handover",
         "label": "Verify the agreed first segment has started",
+        "duration_seconds": 30,
         "roles": [
           "venue-lead",
           "coordinator"

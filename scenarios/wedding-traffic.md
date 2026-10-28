@@ -46,38 +46,45 @@ roles:
 actions:
   - id: owner
     label: Accept wedding coordination
+    duration_seconds: 10
     roles: [coordinator]
     sets: [owner]
     scope: room
     result: A coordination owner is recorded. Assign supplier contact, guest updates, venue checks, and approval responsibilities in chat.
   - id: supplier-status
     label: Confirm the DJ's status and equipment dependency
+    duration_seconds: 25
     roles: [coordinator]
     sets: [dj-status]
     result: The DJ and main sound equipment remain stopped. The 45-75 minute estimate is uncertain. The DJ can share a playlist but cannot confirm road clearance or operate the venue audio remotely.
   - id: guest-impact
     label: Confirm delayed guests and arrival needs
+    duration_seconds: 35
     roles: [guest-liaison]
     sets: [guests]
     result: Eighteen guests are delayed, including a grandparent important to the couple. Seating on arrival is needed. No confirmed arrival time exists. Record how delayed and already-arrived guests will receive updates.
   - id: venue-options
     label: Confirm venue and catering options
+    duration_seconds: 30
     roles: [venue-lead]
     sets: [venue]
     result: Dinner can begin at 19:30 before a later ceremony, or the ceremony can use simple venue audio. Amplified music still ends at 23:00. The venue needs a revised running order and a named contact before changing staff assignments.
   - id: audio-check
     label: Test the backup microphone and playlist setup
+    duration_seconds: 45
     roles: [venue-lead]
     sets: [audio]
     result: A fictional sound check confirms the wired microphone and speaker work for speech and a simple entrance playlist. This is a usable fallback, not the full DJ setup. Assign who will operate it.
   - id: couple-priorities
     label: Confirm the couple's priorities and acceptable tradeoffs
+    duration_seconds: 25
     roles: [couple-representative]
     requires: [guests, venue]
     sets: [priorities]
     result: The couple accepts either a short scheduled delay with dinner first, or a simpler ceremony with a clear way to include the delayed grandparent. They want one coordinator and consistent updates, not repeated requests from several helpers. A specific running order still needs approval.
   - id: approve-plan
     label: Approve the revised wedding plan
+    duration_seconds: 15
     roles: [couple-representative]
     requires: [owner, dj-status, guests, venue, audio, priorities]
     sets: [approved]
@@ -85,6 +92,7 @@ actions:
     result: The couple's representative approves the plan the team has stated in Coordination. Write the chosen first segment, how the grandparent will be included, the audio operator, decision owner, and next-update time. This approval does not establish that delayed people have arrived.
   - id: notify
     label: Issue the approved guest and supplier update
+    duration_seconds: 25
     roles: [guest-liaison, coordinator]
     requires: [approved]
     sets: [notified]
@@ -92,6 +100,7 @@ actions:
     result: The approved plan reaches guests at the venue, delayed guests, the DJ, and venue staff. Add the actual announcement in chat for review. Distinguish confirmed arrangements from travel estimates and explain what people should do now.
   - id: handover
     label: Verify the agreed first segment has started
+    duration_seconds: 30
     roles: [venue-lead, coordinator]
     requires: [approved, notified, audio]
     sets: [started]

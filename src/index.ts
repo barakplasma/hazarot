@@ -100,9 +100,10 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       participants: run.participants.map(({ token: _secret, ...rest }) => rest),
       threads: run.threads, messages: run.messages,
       roleCards: s.roles.filter(r => p.roles.includes(r.id)),
-      actions: s.actions.map(a => ({ id: a.id, label: a.label, allowed: hasRoles(p, a.roles), done: a.sets.every(f => Boolean(run.flags[f])), ready: satisfies(run, a.requires) })),
+      actions: s.actions.map(a => ({ id: a.id, label: a.label, allowed: hasRoles(p, a.roles), done: a.sets.every(f => Boolean(run.flags[f])), ready: satisfies(run, a.requires), durationSeconds: a.duration_seconds ?? 30, inProgress: (run.pendingActions || []).some(job => job.actionId === a.id) })),
       endings: s.endings.filter(e => e.kind !== "world" && hasRoles(p, e.roles)).map(e => ({ id: e.id, label: e.label, kind: e.kind })),
       durationMs: run.durationMs, elapsedMs: this.elapsed(run), endsAt: run.endsAt, ended: run.ended,
+      pendingActions: (run.pendingActions || []).map(job => ({ actionId: job.actionId, participantId: job.participantId, label: s.actions.find(a => a.id === job.actionId)!.label, startedElapsedMs: job.startedElapsedMs, completesElapsedMs: job.completesElapsedMs, durationSeconds: job.durationSeconds })),
       template: s.template, coachMode: modelEnabled(this.env) ? "model" : "authored",
       activities: (run.activities || []).filter(a => a.expiresAt > Date.now() && (!a.participant || a.participant === p.id)),
       invite: p.host ? run.invite : undefined };
@@ -175,6 +176,12 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
   private finish(run: Run, reason: string, label: string, assessment: string, trigger?: number) {
     requireThat(run.phase === "active" || run.phase === "paused", "The round is not active", 409);
     run.activities = [];
+    for (const job of run.pendingActions || []) {
+      const person = run.participants.find(p => p.id === job.participantId)!;
+      const action = this.scenario(run).actions.find(a => a.id === job.actionId)!;
+      this.post(run, job.thread, "Game master", `Canceled without results: ${person.name} — ${action.label}. The round ended before the work completed.`, "system");
+    }
+    run.pendingActions = [];
     run.elapsedMs = this.elapsed(run); run.phase = "debrief"; delete run.endsAt; delete run.startedAt;
     run.ended = { reason, label, assessment, trigger, at: Date.now() };
     const s = this.scenario(run);
@@ -187,26 +194,52 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
     this.save(run);
     this.track(run, "round_ended", { ending_reason: reason, duration_ms: run.elapsedMs });
   }
-  private async arm(run: Run) {
+  // Durable exercise-time deadlines: no sleeping request, timer per participant, or client authority.
+  private advance(run: Run) {
     if (run.phase !== "active") return;
-    const s = this.scenario(run), elapsed = this.elapsed(run);
-    const next = Math.min(run.durationMs, ...s.developments.filter(d => !run.fired.includes(d.id) && d.minute * 60000 > elapsed).map(d => d.minute * 60000));
-    await this.schedule(new Date(Date.now() + Math.max(100, next - elapsed)), "wake", { room: run.room });
+    const elapsed = this.elapsed(run), scenario = this.scenario(run);
+    let changed = false;
+    const due = (run.pendingActions || []).filter(j => j.completesElapsedMs <= elapsed && j.completesElapsedMs < run.durationMs)
+      .sort((a, b) => a.completesElapsedMs - b.completesElapsedMs || a.startedElapsedMs - b.startedElapsedMs || a.id.localeCompare(b.id));
+    for (const job of due) {
+      run.pendingActions = run.pendingActions!.filter(j => j.id !== job.id);
+      const action = scenario.actions.find(a => a.id === job.actionId)!;
+      const person = run.participants.find(p => p.id === job.participantId)!;
+      const m = this.post(run, job.thread, "Game master", `Action completed by ${person.name}: ${action.label}\n${action.result}`, "receipt", person.id);
+      for (const flag of action.sets) run.flags[flag] = m.id;
+      this.track(run, "action_completed", { participant_id: person.id, participant_name: person.name, duration_ms: job.durationSeconds * 1000 });
+      changed = true;
+      if (action.end) {
+        const ending = scenario.endings.find(e => e.id === action.end)!;
+        if (satisfies(run, ending.requires)) { this.finish(run, ending.id, ending.label, ending.assessment, m.id); return; }
+      }
+    }
+    if (elapsed >= run.durationMs) { this.finish(run, "timeout", "Time expired", "Review what was achieved, what remained uncertain, and the handover you would make."); return; }
+    for (const d of scenario.developments) {
+      if (!run.fired.includes(d.id) && d.minute * 60000 <= elapsed && satisfies(run, d.requires)) {
+        run.fired.push(d.id); this.post(run, "coordination", d.speaker ? `${d.speaker} - ai` : "Game master", d.text); changed = true;
+      }
+    }
+    if (changed) this.save(run);
+  }
+  private async arm(run: Run) {
+    // Read the latest record because scheduling yields and another command may have paused/ended it.
+    run = this.load() || run;
+    if (run.phase !== "active") return;
+    const scenario = this.scenario(run), elapsed = this.elapsed(run);
+    const next = Math.min(run.durationMs,
+      ...(run.pendingActions || []).map(job => job.completesElapsedMs),
+      ...scenario.developments.filter(d => !run.fired.includes(d.id) && d.minute * 60000 > elapsed).map(d => d.minute * 60000));
+    await this.schedule(new Date(Math.ceil((Date.now() + Math.max(100, next - elapsed)) / 1000) * 1000), "wake", { room: run.room });
   }
   async wake() {
     const run = this.load(); if (!run || run.phase !== "active") return;
-    const elapsed = this.elapsed(run);
-    if (elapsed >= run.durationMs) { this.finish(run, "timeout", "Time expired", "Review what was achieved, what remained uncertain, and the handover you would make."); return; }
-    for (const d of this.scenario(run).developments) {
-      if (!run.fired.includes(d.id) && d.minute * 60000 <= elapsed && satisfies(run, d.requires)) {
-        run.fired.push(d.id); this.post(run, "coordination", d.speaker ? `${d.speaker} - ai` : "Game master", d.text);
-      }
-    }
-    this.save(run); await this.arm(run);
+    this.advance(run); await this.arm(run);
   }
   async onConnect(connection: Connection, context: ConnectionContext) {
     const run = this.load();
     if (!run) { connection.close(1008, "Unknown room"); return; }
+    this.advance(run);
     let participant: Participant;
     try { participant = this.identify(run, new URL(context.request.url).searchParams.get("token")); }
     catch { connection.close(1008, "Unauthorized"); return; }
@@ -247,7 +280,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
           requireThat(secretRoom(run.room) || invite === run.invite, "Use the invitation link", 401);
           return response({ scenario: overview(this.scenario(run)), phase: run.phase, room: run.room, participants: run.participants.map(p => ({ name: p.name, roles: p.roles })) });
         }
-        if (run.phase === "active" && this.elapsed(run) >= run.durationMs) { await this.wake(); run = this.load()!; }
+        this.advance(run);
         return response(this.snapshot(run, this.identify(run, supplied)));
       }
       requireThat(request.method === "POST", "Method not allowed", 405);
@@ -266,6 +299,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
       const command = textField(body.commandId, 100, "command ID");
       const key = `${p.id}:${command}`;
       const reply = (current: Run) => response(body.ackOnly ? { accepted: true, revision: current.revision, commandId: command } : this.snapshot(current, p));
+      this.advance(run);
       if (Object.hasOwn(run.processed, key)) return response(body.ackOnly ? { accepted: true, duplicate: true, commandId: command, revision: run.revision } : { duplicate: true, ...this.snapshot(run, p) });
       if (run.phase === "active" && this.elapsed(run) >= run.durationMs) { this.finish(run, "timeout", "Time expired", "Time ran out before this command could affect the exercise."); run = this.load()!; }
       const hostOnly = () => requireThat(p.host, "Facilitator permission required", 403);
@@ -307,15 +341,12 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
           requireThat(hasRoles(p, a.roles), "Your role cannot commit this action", 403);
           requireThat(satisfies(run, a.requires), "Prerequisite evidence or approval has not been recorded", 409);
           requireThat(!a.sets.every(f => Boolean(run!.flags[f])), "This action is already recorded", 409);
-          const m = this.post(run, a.scope === "room" ? "coordination" : threadId(), "Game master", `Action committed by ${p.name}: ${a.label}\n${a.result}`, "receipt", p.id);
-          for (const f of a.sets) run.flags[f] = m.id;
-          if (a.end) {
-            const ending = s.endings.find(e => e.id === a.end)!;
-            requireThat(satisfies(run, ending.requires), "Ending is not established", 409);
-            run.processed[key] = true; this.finish(run, ending.id, ending.label, ending.assessment, m.id);
-            this.track(run, "action", { participant_name: p.name, participant_id: p.id });
-            return reply(run);
-          }
+          requireThat(!(run.pendingActions || []).some(job => job.participantId === p.id), "You are occupied with an action; wait for it to complete", 409);
+          requireThat(!(run.pendingActions || []).some(job => job.actionId === a.id), "A teammate is already working on this action", 409);
+          const elapsed = this.elapsed(run), durationSeconds = a.duration_seconds ?? 30;
+          const target = a.scope === "room" ? "coordination" : threadId();
+          run.pendingActions = [...(run.pendingActions || []), { id: key, actionId: a.id, participantId: p.id, thread: target, startedElapsedMs: elapsed, completesElapsedMs: elapsed + durationSeconds * 1000, durationSeconds }];
+          this.post(run, target, "Game master", `Action started by ${p.name}: ${a.label}. Occupied for ${durationSeconds} exercise seconds; results are pending.`, "system", p.id);
           break;
         }
         case "end": {
@@ -323,6 +354,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
           let label: string, assessment: string, reason: string;
           if (body.endingId === "facilitator-stop") { hostOnly(); label = "Facilitator stopped the round"; reason = "facilitator-stop"; assessment = "Review the work so far; stopping is not a performance judgment."; }
           else {
+            requireThat(!(run.pendingActions || []).some(job => job.participantId === p.id), "Finish your current action before declaring an ending", 409);
             const e = s.endings.find(e => e.id === body.endingId); requireThat(e && e.kind !== "world", "Use a verified scenario action for this ending");
             requireThat(hasRoles(p, e.roles), "Your role cannot declare this ending", 403);
             requireThat(satisfies(run, e.requires), "Ending prerequisites not established", 409);
@@ -334,6 +366,7 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
         }
         case "coach": {
           requireThat(run.phase !== "lobby", "Start the round before asking the coach", 409);
+          requireThat(!(run.pendingActions || []).some(job => job.participantId === p.id), "Finish your current action before asking the coach", 409);
           const own = `personal-${p.id}`, question = textField(body.question || "What is a useful next communication step for my role?", 1500, "coaching question");
           const recent = run.messages.filter(m => m.thread === own && m.kind === "coach").at(-1);
           requireThat(!recent || Date.now() - recent.at > 1500, "Give the coach a moment before asking again", 429);
@@ -355,8 +388,8 @@ export class Rehearsal extends Agent<Env, { protocol: number }> {
           if (character) this.ctx.waitUntil(this.answerCharacter(run, p, character.id, thread, body.text, key));
         }
       }
-      if (["start", "resume"].includes(body.op)) await this.arm(run);
-      return reply(run);
+      if (["start", "resume", "action"].includes(body.op)) await this.arm(run);
+      return reply(this.load() || run);
     } catch (error) {
       if (error instanceof RequestError) return response({ error: error.message }, error.status);
       console.error("Rehearsal request failed", error instanceof Error ? error.name : "UnknownError");

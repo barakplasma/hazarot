@@ -1,6 +1,6 @@
 import type { CharacterProfile } from "./character";
 export type Role = { id: string; name: string; responsibility: string; authority: string; knowledge: string; hint: string };
-export type Action = { id: string; label: string; roles: string[]; requires?: string[]; sets: string[]; result: string; end?: string; scope?: "thread" | "room" };
+export type Action = { id: string; label: string; duration_seconds?: number; roles: string[]; requires?: string[]; sets: string[]; result: string; end?: string; scope?: "thread" | "room" };
 export type Ending = { id: string; label: string; kind: "declaration" | "world" | "terminal"; roles: string[]; requires?: string[]; assessment: string };
 export type Scenario = {
   id: string; title: string; category: string; author: string; version: number;
@@ -15,12 +15,14 @@ export type Participant = { id: string; name: string; roles: string[]; token: st
 export type Thread = { id: string; title: string; kind: "coordination" | "personal" | "investigation" | "meeting"; owner?: string };
 export type Message = { id: number; thread: string; author: string; participant?: string; text: string; commandId?: string; at: number; kind: "message" | "system" | "receipt" | "coach"; refs?: number[] };
 export type EndRecord = { reason: string; label: string; trigger?: number; at: number; assessment: string };
+export type PendingAction = { id: string; actionId: string; participantId: string; thread: string; startedElapsedMs: number; completesElapsedMs: number; durationSeconds: number };
 export type Run = {
   scenarioId: string; scenarioVersion: number; room: string; invite: string;
   phase: "lobby" | "active" | "paused" | "debrief"; participants: Participant[];
   threads: Thread[]; messages: Message[]; flags: Record<string, number>;
   processed: Record<string, unknown>; durationMs: number; elapsedMs: number;
   startedAt?: number; endsAt?: number; ended?: EndRecord; fired: string[];
+  pendingActions?: PendingAction[];
   activities?: { id: string; label: string; thread: string; participant?: string; startedAt: number; expiresAt: number }[];
   revision: number; seq: number;
 };

@@ -29,7 +29,7 @@ No Cloudflare account or external database is required.
 - 1–10 participants; each can hold multiple responsibilities for small groups.
 - A shared coordination feed, individual role/coaching threads, and work threads.
 - Four Markdown scenarios: **CI credentials exposed**, **The bus isn't coming**, **The DJ is stuck in traffic**, and **The agent approved its own access**.
-- Confirmed fictional actions, role authority, and explicit approval prerequisites.
+- Timed fictional actions reserve the participant until completion, with role authority and approval prerequisites.
 - Timed developments, pause/resume, time limits, and scenario-defined endings.
 - Declaration endings can be premature; verified world endings need recorded facts.
 - An evidence-linked authored debrief, reflection chat, transcript export, and replay.
@@ -144,6 +144,37 @@ Information belongs in the relevant role card or action result. `scope: room`
 posts a result in Coordination; otherwise the result is posted in the selected
 thread. Change the scenario version when changing facts or rules. Active runs
 require their pinned scenario version to remain available after an upgrade.
+
+## Action time costs
+
+Scenario actions accept `duration_seconds` (positive, at most 3600; defaults to 30
+for older Markdown). Included exercises use compressed costs of 10–60 seconds.
+A confirmed click starts work immediately and reserves that participant. Other
+participants can do different tasks in parallel; the same task cannot be started
+twice. Chat and coordination threads remain available while working. Further
+actions, coaching requests, and scenario ending declarations are blocked for
+that person until completion. Facilitator pause/stop controls remain available.
+
+The result, evidence flags and action-triggered ending are committed only when
+the exercise-time deadline is reached. Timers and reservations are durable and
+freeze while the round is paused. Reloading, reconnecting, or restarting does
+not release a reservation. The UI shows task costs and per-participant countdowns;
+zero means awaiting the server's completion, not client permission to act.
+Ending the round cancels unfinished tasks without awarding their results. A task
+finishing exactly at the round deadline loses to timeout. Normal scheduling may
+publish completion up to roughly a second after the displayed countdown reaches
+zero; the server remains authoritative. Durations are authored rehearsal costs,
+not claims about real incident-resolution times.
+
+```yaml
+actions:
+  - id: audit
+    label: Inspect token audit records
+    duration_seconds: 40
+    roles: [security]
+    sets: [audit]
+    result: The fictional audit evidence is now available.
+```
 
 ## Architecture
 

@@ -40,27 +40,32 @@ roles:
 actions:
   - id: establish-owner
     label: Accept event coordination
+    duration_seconds: 10
     roles: [planner, manager]
     sets: [owner]
     scope: room
     result: A coordination owner is recorded. Agree how logistics, approvals, and participant communication will be divided.
   - id: needs
     label: Confirm participant transport needs
+    duration_seconds: 25
     roles: [representative]
     sets: [needs]
     result: Forty people need transport, including two requiring an accessible vehicle. Communicate that constraint without sharing personal medical details.
   - id: quotes
     label: Request transport options
+    duration_seconds: 40
     roles: [planner]
     sets: [quotes]
     result: The immediate replacement has 25 seats and no accessibility provision. An accessible 40-seat bus is available 45 minutes later for $400 extra. Neither option has been booked.
   - id: venue
     label: Check the later arrival with the venue
+    duration_seconds: 30
     roles: [planner]
     sets: [venue]
     result: The venue confirms it can accommodate a 45-minute delay if given a firm revised arrival time before booking.
   - id: approve
     label: Approve the later accessible bus and $400
+    duration_seconds: 15
     roles: [manager]
     requires: [quotes, needs, venue]
     sets: [approved]
@@ -68,6 +73,7 @@ actions:
     result: The manager approves $400 additional spend and a later departure with accessible transport. The planner still needs to book it and the representative needs to communicate the plan.
   - id: book
     label: Book the later accessible bus
+    duration_seconds: 40
     roles: [planner]
     requires: [approved]
     sets: [booked]
@@ -75,6 +81,7 @@ actions:
     result: The accessible 40-seat bus is booked for 45 minutes later. The venue receives the revised arrival time. In this short exercise, the wait is compressed once the plan is communicated.
   - id: communicate
     label: Communicate the confirmed travel plan
+    duration_seconds: 20
     roles: [representative, planner]
     requires: [booked]
     sets: [communicated]
@@ -82,6 +89,7 @@ actions:
     result: Participants receive the revised departure and arrival details and the access arrangement. Add your actual announcement in chat so the group can review its clarity.
   - id: board
     label: Verify everyone has boarded
+    duration_seconds: 30
     roles: [planner, representative]
     requires: [communicated, booked, needs]
     sets: [boarded]
