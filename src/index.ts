@@ -27,7 +27,12 @@ const secretRoom = (id: string) => /^[0-9A-HJKMNP-TV-Z]{16}$/.test(id);
 
 export class Rehearsal extends Agent<Env, { protocol: number }> {
   initialState = { protocol: 1 };
-  onStart() { this.sql`CREATE TABLE IF NOT EXISTS rehearsal_run (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)`; }
+  async onStart() {
+    this.sql`CREATE TABLE IF NOT EXISTS rehearsal_run (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)`;
+    // Recover the save-before-schedule crash window and reconcile overdue work on activation.
+    const run = this.load();
+    if (run?.phase === "active") { this.advance(run); await this.arm(run); }
+  }
   // Never put hidden scenario data in Agent.state: the SDK synchronizes it.
   validateStateChange(_next: { protocol: number }, source: Connection | "server") {
     if (source !== "server") throw new RequestError("Client state writes are disabled", 403);

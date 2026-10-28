@@ -20,7 +20,7 @@ const creator=makeCreator('http://127.0.0.1:9988');
 for(const dir of ["src","public"]) cpSync(dir,`${project}/${dir}`,{recursive:true});
 // Short exercise costs in the private browser fixture only; production stays authored.
 const catalogPath=`${project}/src/catalog.generated.ts`;
-writeFileSync(catalogPath,readFileSync(catalogPath,'utf8').replace(/"duration_seconds": [0-9.]+/g,'"duration_seconds": 2'));
+writeFileSync(catalogPath,readFileSync(catalogPath,'utf8').replace(/"duration_seconds": [0-9.]+/g,'"duration_seconds": 4'));
 cpSync("wrangler.jsonc",`${project}/wrangler.jsonc`);
 writeFileSync(`${project}/.dev.vars`,creator.vars+`AI_MINUTE_CALLS=200\nMODEL_BASE_URL=http://127.0.0.1:${fixture.address().port}/v1\nMODEL_NAME=fixture\n`);
 const child=spawn(binary,["dev",project,"--host","127.0.0.1","--port","9988","--no-watch","--logs"],{detached:true,env:{...process.env,PATH:`${process.cwd()}/node_modules/.bin:${process.env.PATH}`},stdio:["ignore","pipe","pipe"]});
@@ -93,6 +93,7 @@ try{
   await peer.getByRole("button",{name:"Inspect token audit records",exact:true}).click();await peer.getByRole("button",{name:"Confirm",exact:true}).click();
   await peer.getByText(/You: Inspect token audit records/).waitFor();
   assert(await peer.getByRole("button",{name:"Revoke the exposed publishing token",exact:true}).isEnabled()===false);
+  await peer.screenshot({path:"qa/action-in-progress.png",fullPage:true});
   await peer.locator('#message').fill('Investigation is running; I will report when it completes.');
   await peer.getByRole('button',{name:'Send',exact:true}).click();
   await page.getByText('Investigation is running; I will report when it completes.',{exact:true}).waitFor();

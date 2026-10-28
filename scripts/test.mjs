@@ -56,7 +56,7 @@ writeFileSync(`${project}/.dev.vars`, creator.vars + `AI_MINUTE_CALLS=200\nAI_DA
 
 async function wait(fn, timeout = 12000) { const until = Date.now()+timeout; let error; while(Date.now()<until) { try { const v=await fn(); if(v) return v; } catch(e) { error=e; } await sleep(100); } throw new Error(`Timed out: ${error?.message || "condition"}`); }
 async function api(path, body, token, expected = 200, headers = {}) {
-  const r = await fetch(base + path, { method: body ? "POST" : "GET", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) });
+  const r = await fetch(base + path, { method: body ? "POST" : "GET", headers: { "content-type": "application/json", connection: "close", ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000) });
   const text = await r.text(); assert.equal(r.status, expected, text); return JSON.parse(text);
 }
 async function start() {
@@ -239,7 +239,10 @@ try {
   assert.equal((await snap(cost)).elapsedMs,frozen.elapsedMs);assert.equal((await snap(cost)).pendingActions.length,2);
   await stop();await start();assert.deepEqual((await snap(cost)).pendingActions,frozen.pendingActions);
   await cmd(cost,'resume');
-  costState=await wait(async()=>{const v=await snap(cost);return !v.pendingActions.length&&v;});
+  await stop();await start(); // Active deadlines must also recover without a new action command.
+  let latestCost;
+  try { costState=await wait(async()=>{const v=await snap(cost);latestCost={phase:v.phase,elapsedMs:v.elapsedMs,pending:v.pendingActions};return !v.pendingActions.length&&v;}); }
+  catch(error){console.error('Action recovery state',JSON.stringify(latestCost));throw error;}
   assert(costState.actions.find(a=>a.id==='establish-owner').done);assert(costState.actions.find(a=>a.id==='quotes').done);
   assert.equal(costState.messages.filter(m=>m.kind==='receipt'&&m.text.includes('Action completed')&&m.text.includes('Accept event coordination')).length,1);
   await api(cost.path,jobCommand,cost.token);assert.equal((await snap(cost)).pendingActions.length,0);
