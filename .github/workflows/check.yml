@@ -64,6 +64,34 @@ jobs:
             .build/runtime-smoke.log
             .build/budget-runtime.log
             .build/deployment-runtime.log
+  pr-image:
+    # Build and smoke-test the image before merge on the runner's own architecture; nothing is pushed.
+    if: github.event_name == 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: hazarot:pr
+      - name: Smoke test the image
+        run: |
+          docker run -d --name hazarot-smoke -p 127.0.0.1:19090:9876 \
+            -e MODEL_BASE_URL=http://127.0.0.1:9/v1 -e MODEL_NAME=smoke-model hazarot:pr
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19090/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:19090/health
+          curl -fsS http://127.0.0.1:19090/api/scenarios | jq -e '.coachMode == "model" and (.scenarios | any(.id == "wedding-traffic"))'
+          docker exec hazarot-smoke sh -c '! command -v node && ! command -v npm && ! command -v esbuild'
+      - name: Container logs
+        if: always()
+        run: docker logs hazarot-smoke 2>&1 | tail -50 || true
   image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: check
@@ -91,7 +119,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/barakplasma/hazarot
-      - name: Smoke test the published celld-based image
+      - name: Smoke test the published UBI/celld image
         env:
           IMAGE: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
         run: |

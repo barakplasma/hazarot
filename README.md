@@ -15,8 +15,8 @@ docker compose up -d
 
 Open the URL in the generated private `hazarot-admin.json` to create rooms.
 The setup tool is TypeScript; Docker runs it once in an official Node container.
-The application image remains based on **ghcr.io/denoland/celld** and has no Node
-runtime. Use `--build` with `HAZAROT_IMAGE=hazarot:local` if building locally.
+The application image is based on **Red Hat UBI 10 minimal** with the pinned
+celld 0.6.3 release binary and has no Node runtime. Use `--build` with `HAZAROT_IMAGE=hazarot:local` if building locally.
 
 See [the hosting guide](docs/hosting.md) for HTTPS, inference credentials,
 **Kubernetes/Helm**, **Linux VM bundles**, persistent storage, backups and upgrades.
@@ -201,7 +201,7 @@ artifacts. Follow [docs/hosting.md](docs/hosting.md). The old `k8s/poc.yaml` is 
 legacy example; it does not contain the current room-creation configuration.
 
 All paths retain the single-writer celld 0.6.3 local store. Do not scale replicas
-or share a live data directory. The OCI final stage is the official celld image;
+or share a live data directory. The OCI final stage is UBI 10 minimal plus the celld release binary;
 Node is build/setup-only. TypeScript setup generates an admin link and a separate
 public digest without installing a certificate. Docker/Kubernetes may supply the
 provider key through `MODEL_API_KEY_FILE` instead of an environment value.
