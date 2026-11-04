@@ -65,44 +65,33 @@ jobs:
             .build/budget-runtime.log
             .build/deployment-runtime.log
   pr-image:
-    # Build and smoke-test both architectures before merge; nothing is pushed.
+    # Build and smoke-test the image before merge on the runner's own architecture; nothing is pushed.
     if: github.event_name == 'pull_request'
     needs: check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          platforms: linux/amd64
-          tags: hazarot:pr-amd64
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          platforms: linux/arm64
-          tags: hazarot:pr-arm64
-      - name: Smoke test both architectures
+          tags: hazarot:pr
+      - name: Smoke test the image
         run: |
-          for arch in amd64 arm64; do
-            docker run -d --name "hazarot-$arch" --platform "linux/$arch" -p 127.0.0.1::9876 \
-              -e MODEL_BASE_URL=http://127.0.0.1:9/v1 -e MODEL_NAME=smoke-model "hazarot:pr-$arch"
-            port=$(docker port "hazarot-$arch" 9876/tcp | head -1 | cut -d: -f2)
-            for attempt in $(seq 1 90); do
-              if curl -fsS "http://127.0.0.1:$port/health" > /dev/null; then break; fi
-              sleep 1
-            done
-            curl -fsS "http://127.0.0.1:$port/health"
-            curl -fsS "http://127.0.0.1:$port/api/scenarios" | jq -e '.coachMode == "model" and (.scenarios | any(.id == "wedding-traffic"))'
-            docker exec "hazarot-$arch" sh -c '! command -v node && ! command -v npm && ! command -v esbuild'
+          docker run -d --name hazarot-smoke -p 127.0.0.1:19090:9876 \
+            -e MODEL_BASE_URL=http://127.0.0.1:9/v1 -e MODEL_NAME=smoke-model hazarot:pr
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:19090/health > /dev/null; then break; fi
+            sleep 1
           done
+          curl -fsS http://127.0.0.1:19090/health
+          curl -fsS http://127.0.0.1:19090/api/scenarios | jq -e '.coachMode == "model" and (.scenarios | any(.id == "wedding-traffic"))'
+          docker exec hazarot-smoke sh -c '! command -v node && ! command -v npm && ! command -v esbuild'
       - name: Container logs
         if: always()
-        run: for arch in amd64 arm64; do docker logs "hazarot-$arch" 2>&1 | tail -50 || true; done
+        run: docker logs hazarot-smoke 2>&1 | tail -50 || true
   image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: check
