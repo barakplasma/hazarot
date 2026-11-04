@@ -91,7 +91,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/barakplasma/hazarot
-      - name: Smoke test the published celld-based image
+      - name: Smoke test the published UBI/celld image
         env:
           IMAGE: ghcr.io/barakplasma/hazarot:sha-${{ github.sha }}
         run: |
